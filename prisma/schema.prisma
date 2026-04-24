@@ -1,0 +1,187 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// USERS
+// ─────────────────────────────────────────────────────────────
+model User {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email        String   @unique @db.VarChar(255)
+  username     String   @unique @db.VarChar(100)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+
+  // CRITICAL: balance uses Decimal(16,6) for financial precision.
+  // All mutations MUST go through SELECT ... FOR UPDATE to prevent race conditions.
+  balance      Decimal  @default(0) @db.Decimal(16, 6)
+
+  // Personal API key for programmatic access to 3Flames
+  apiKey       String?  @unique @map("api_key") @db.VarChar(64)
+
+  role         UserRole @default(USER)
+  status       UserStatus @default(ACTIVE)
+
+  // Terms of Service version the user accepted at registration (or last update)
+  acceptedTosVersion String @default("1.0") @map("accepted_tos_version") @db.VarChar(20)
+
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  orders       Order[]
+  transactions Transaction[]
+
+  @@index([email])
+  @@index([apiKey])
+  @@index([status])
+  @@map("users")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
+
+// ─────────────────────────────────────────────────────────────
+// SERVICES
+// ─────────────────────────────────────────────────────────────
+model Service {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  // Provider's service ID — used when placing orders upstream
+  providerServiceId  String    @unique @map("provider_service_id") @db.VarChar(50)
+
+  name           String        @db.VarChar(500)
+  category       String        @db.VarChar(255)
+  description    String?       @db.Text
+
+  // Provider's cost per 1000 units
+  originalPrice  Decimal       @map("original_price") @db.Decimal(16, 6)
+
+  // Our retail price = originalPrice * (1 + profitMargin/100)
+  sellingPrice   Decimal       @map("selling_price") @db.Decimal(16, 6)
+
+  // The margin applied when this price was last calculated
+  profitMargin   Decimal       @default(30) @map("profit_margin") @db.Decimal(5, 2)
+
+  minQuantity    Int           @map("min_quantity")
+  maxQuantity    Int           @map("max_quantity")
+
+  type           ServiceType   @default(DEFAULT)
+  isActive       Boolean       @default(true) @map("is_active")
+
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  orders         Order[]
+
+  @@index([category])
+  @@index([isActive])
+  @@index([providerServiceId])
+  @@map("services")
+}
+
+enum ServiceType {
+  DEFAULT
+  SUBSCRIPTION
+  CUSTOM_COMMENTS
+  PACKAGE
+}
+
+// ─────────────────────────────────────────────────────────────
+// ORDERS
+// ─────────────────────────────────────────────────────────────
+model Order {
+  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  userId       String      @map("user_id") @db.Uuid
+  user         User        @relation(fields: [userId], references: [id])
+
+  serviceId    String      @map("service_id") @db.Uuid
+  service      Service     @relation(fields: [serviceId], references: [id])
+
+  // Provider's order ID — returned after placeOrder call
+  apiOrderId   String?     @map("api_order_id") @db.VarChar(100)
+
+  // The target link/URL for the service
+  link         String      @db.VarChar(2000)
+  quantity     Int
+
+  // Exact amount deducted from user balance at order time
+  charge       Decimal     @db.Decimal(16, 6)
+
+  status       OrderStatus @default(PENDING)
+
+  // Provider-reported start count & remaining count (for partial refund calc)
+  startCount   Int?        @map("start_count")
+  remains      Int?
+
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([status])
+  @@index([apiOrderId])
+  @@index([createdAt])
+  @@index([userId, status])
+  @@map("orders")
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  IN_PROGRESS
+  COMPLETED
+  PARTIAL
+  CANCELED
+  REFUNDED
+  ERROR
+}
+
+// ─────────────────────────────────────────────────────────────
+// TRANSACTIONS (Strict Financial Ledger)
+// ─────────────────────────────────────────────────────────────
+model Transaction {
+  id           String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  userId       String          @map("user_id") @db.Uuid
+  user         User            @relation(fields: [userId], references: [id])
+
+  type         TransactionType
+  amount       Decimal         @db.Decimal(16, 6)
+
+  // Balance AFTER this transaction was applied — audit trail
+  balanceAfter Decimal         @map("balance_after") @db.Decimal(16, 6)
+
+  // Optional reference to the order that triggered this transaction
+  orderId      String?         @map("order_id") @db.Uuid
+
+  description  String          @db.VarChar(500)
+
+  createdAt    DateTime        @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([type])
+  @@index([orderId])
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@map("transactions")
+}
+
+enum TransactionType {
+  DEPOSIT
+  PURCHASE
+  REFUND
+  ADMIN_CREDIT
+  ADMIN_DEBIT
+}
