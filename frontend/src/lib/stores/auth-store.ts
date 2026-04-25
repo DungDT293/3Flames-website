@@ -62,6 +62,7 @@ export const useAuthStore = create<AuthState>((set) => {
             id: profile.id,
             email: profile.email,
             username: profile.username,
+            phone: profile.phone ?? null,
             role: profile.role as UserRole,
             status: profile.status as "ACTIVE" | "SUSPENDED" | "BANNED",
           },
