@@ -330,6 +330,9 @@ export class AuthService {
 
     const token = this.signToken(user.id, user.email);
 
+    // Update lastLoginAt in background — non-blocking
+    prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } }).catch(() => {});
+
     return {
       user: {
         id: user.id,

@@ -8,7 +8,6 @@ import {
   DollarSign,
   TrendingUp,
   Loader2,
-  Wallet,
   ArrowUpRight,
   ArrowDownRight,
 } from "lucide-react";
@@ -203,14 +202,6 @@ export default function AdminOverviewPage() {
         icon: Users,
         color: "text-green-400",
       },
-      {
-        label: "Nạp tiền",
-        value: formatDisplayMoney(analytics.summary.deposits.current, currency, rate),
-        previous: formatDisplayMoney(analytics.summary.deposits.previous, currency, rate),
-        change: analytics.summary.deposits.changePercent,
-        icon: Wallet,
-        color: "text-emerald-400",
-      },
     ];
   }, [analytics, currency, rate]);
 
@@ -252,7 +243,7 @@ export default function AdminOverviewPage() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {metrics.map((m) => (
           <Card key={m.label} className="relative overflow-hidden">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -308,9 +299,8 @@ export default function AdminOverviewPage() {
         </Card>
       </div>
 
-      {/* Charts row 2: profit + deposits bars */}
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Card className="p-5">
+      {/* Charts row 2: profit bar */}
+      <Card className="p-5">
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold text-app-fg">Lợi nhuận theo kỳ</p>
@@ -323,21 +313,6 @@ export default function AdminOverviewPage() {
           <BarChart data={series} metric="profit" color="text-violet-400" currency={currency} rate={rate} />
           <XLabels data={series} />
         </Card>
-
-        <Card className="p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <p className="text-sm font-semibold text-app-fg">Nạp tiền theo kỳ</p>
-              <p className="text-xs text-app-muted mt-0.5">Tổng tiền nạp confirmed</p>
-            </div>
-            <span className="inline-flex items-center gap-1.5 text-xs text-emerald-400">
-              <span className="h-2 w-2 rounded-full bg-emerald-400" /> Nạp tiền
-            </span>
-          </div>
-          <BarChart data={series} metric="deposits" color="text-emerald-400" currency={currency} rate={rate} />
-          <XLabels data={series} />
-        </Card>
-      </div>
 
       {/* Data table */}
       <Card className="overflow-hidden">
@@ -353,7 +328,6 @@ export default function AdminOverviewPage() {
                 <th className="px-5 py-3 text-right font-medium">Lợi nhuận</th>
                 <th className="px-5 py-3 text-right font-medium">Đơn</th>
                 <th className="px-5 py-3 text-right font-medium">User mới</th>
-                <th className="px-5 py-3 text-right font-medium">Nạp tiền</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-app-border">
@@ -364,7 +338,6 @@ export default function AdminOverviewPage() {
                   <td className="px-5 py-3 text-right text-violet-400">{formatDisplayMoney(row.profit, currency, rate)}</td>
                   <td className="px-5 py-3 text-right text-app-fg">{formatNumber(row.orders)}</td>
                   <td className="px-5 py-3 text-right text-green-400">{formatNumber(row.users)}</td>
-                  <td className="px-5 py-3 text-right text-emerald-400">{formatDisplayMoney(row.deposits, currency, rate)}</td>
                 </tr>
               ))}
             </tbody>

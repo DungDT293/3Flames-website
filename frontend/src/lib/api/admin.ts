@@ -148,6 +148,7 @@ export interface AdminUserDetail {
     acceptedTosVersion: string;
     isEmailVerified: boolean;
     updatedAt: string;
+    lastLoginAt: string | null;
     totalDeposits: number;
   };
   orders: Array<{

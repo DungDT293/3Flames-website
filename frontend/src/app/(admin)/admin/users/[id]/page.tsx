@@ -34,6 +34,24 @@ function roleLabel(role: string): string {
   }
 }
 
+function actionLabel(action: string): string {
+  const map: Record<string, string> = {
+    ADD_BALANCE: "Cộng số dư",
+    DEDUCT_BALANCE: "Trừ số dư",
+    SUSPEND_USER: "Tạm khóa tài khoản",
+    UNSUSPEND_USER: "Mở khóa tài khoản",
+    DELETE_USER: "Xóa tài khoản",
+    UPDATE_ROLE: "Đổi vai trò",
+    CONFIRM_DEPOSIT: "Xác nhận nạp tiền",
+    REJECT_DEPOSIT: "Từ chối nạp tiền",
+    RESET_CIRCUIT_BREAKER: "Reset Circuit Breaker",
+    UPDATE_GLOBAL_MARGIN: "Cập nhật margin toàn cục",
+    UPDATE_SERVICE_MARGIN: "Cập nhật margin dịch vụ",
+    RESET_SERVICE_MARGIN: "Reset margin dịch vụ",
+  };
+  return map[action] ?? action;
+}
+
 function statusVariant(status: string): "success" | "warning" | "destructive" | "secondary" {
   if (["ACTIVE", "CONFIRMED", "COMPLETED"].includes(status)) return "success";
   if (["PENDING", "PROCESSING", "IN_PROGRESS", "PARTIAL"].includes(status)) return "warning";
@@ -120,13 +138,15 @@ export default function AdminUserDetailPage() {
           <div className="rounded-lg border border-app-border p-3"><p className="text-app-muted">User ID</p><p className="mt-1 break-all font-mono text-xs text-app-fg">{data.user.id}</p></div>
           <div className="rounded-lg border border-app-border p-3"><p className="text-app-muted">ToS version</p><p className="mt-1 font-semibold text-app-fg">v{data.user.acceptedTosVersion}</p></div>
           <div className="rounded-lg border border-app-border p-3"><p className="text-app-muted">Ngày tạo</p><p className="mt-1 font-semibold text-app-fg">{formatDate(data.user.createdAt)}</p></div>
+          <div className="rounded-lg border border-app-border p-3"><p className="text-app-muted">Lần cuối đăng nhập</p><p className="mt-1 font-semibold text-app-fg">{data.user.lastLoginAt ? formatDate(data.user.lastLoginAt) : "Chưa đăng nhập"}</p></div>
+          <div className="rounded-lg border border-app-border p-3"><p className="text-app-muted">Cập nhật lần cuối</p><p className="mt-1 font-semibold text-app-fg">{formatDate(data.user.updatedAt)}</p></div>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><ReceiptText className="h-5 w-5 text-brand-500" /> Lịch sử dịch vụ / đơn hàng</CardTitle>
-          <CardDescription>20 đơn gần nhất, bao gồm link user đã áp vào dịch vụ.</CardDescription>
+          <CardDescription>50 đơn gần nhất, bao gồm link user đã áp vào dịch vụ.</CardDescription>
         </CardHeader>
         <CardContent>
           {data.orders.length === 0 ? <Empty text="User chưa đặt đơn nào." /> : (
@@ -155,7 +175,7 @@ export default function AdminUserDetailPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><WalletCards className="h-5 w-5 text-brand-500" /> Lịch sử nạp tiền</CardTitle>
-            <CardDescription>20 yêu cầu VietQR gần nhất của user.</CardDescription>
+            <CardDescription>50 yêu cầu VietQR gần nhất của user.</CardDescription>
           </CardHeader>
           <CardContent>
             {data.deposits.length === 0 ? <Empty text="User chưa tạo yêu cầu nạp tiền." /> : (
@@ -177,20 +197,39 @@ export default function AdminUserDetailPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><Clock3 className="h-5 w-5 text-brand-500" /> Hoạt động / audit</CardTitle>
-            <CardDescription>20 hoạt động audit gần nhất liên quan tới user. Lượt truy cập web sẽ cần bổ sung tracker riêng nếu muốn đếm page view chính xác.</CardDescription>
+            <CardDescription>50 hoạt động audit gần nhất liên quan tới user này.</CardDescription>
           </CardHeader>
           <CardContent>
             {data.activity.length === 0 ? <Empty text="Chưa có hoạt động audit." /> : (
               <div className="space-y-3">
-                {data.activity.map((log) => (
-                  <div key={log.id} className="rounded-lg border border-app-border p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div><p className="font-semibold text-app-fg">{log.action}</p><p className="mt-1 text-xs text-app-muted">{log.entity} · {log.actor?.username || "SYSTEM"}</p></div>
-                      <p className="whitespace-nowrap text-xs text-app-muted">{formatDate(log.createdAt)}</p>
+                {data.activity.map((log) => {
+                  const isSelf = log.actorId === data.user.id;
+                  const actorName = log.actor ? `@${log.actor.username}` : "SYSTEM";
+                  const actorRole = log.actor ? roleLabel(log.actor.role) : "Hệ thống";
+                  const targetName = log.target ? `@${log.target.username}` : null;
+                  return (
+                    <div key={log.id} className="rounded-lg border border-app-border p-3 space-y-1.5">
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="font-semibold text-sm text-app-fg">{actionLabel(log.action)}</p>
+                        <p className="whitespace-nowrap text-xs text-app-muted shrink-0">{formatDate(log.createdAt)}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-app-muted">
+                        <span>
+                          Thực hiện bởi:{" "}
+                          <span className={isSelf ? "text-brand-400 font-medium" : "text-app-fg font-medium"}>
+                            {actorName}
+                          </span>
+                          {" "}({actorRole})
+                        </span>
+                        {targetName && targetName !== actorName && (
+                          <span>Tác động lên: <span className="text-app-fg font-medium">{targetName}</span></span>
+                        )}
+                        <span>Entity: <span className="text-app-fg">{log.entity}</span></span>
+                        {log.ipAddress && <span>IP: {log.ipAddress}</span>}
+                      </div>
                     </div>
-                    <p className="mt-2 text-xs text-app-muted">IP: {log.ipAddress || "—"}</p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </CardContent>

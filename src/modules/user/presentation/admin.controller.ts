@@ -448,6 +448,7 @@ adminRouter.get(
     const offset = (page - 1) * limit;
 
     const where: Prisma.UserWhereInput = {
+      NOT: { username: { startsWith: 'deleted_' } },
       ...(status && { status: status as UserStatus }),
       ...(role && { role: role as UserRole }),
       ...(search && {
@@ -519,6 +520,7 @@ adminRouter.get(
           isEmailVerified: true,
           createdAt: true,
           updatedAt: true,
+          lastLoginAt: true,
           _count: { select: { orders: true, transactions: true, depositRequests: true } },
         },
       });
@@ -546,7 +548,7 @@ adminRouter.get(
             service: { select: { id: true, name: true, category: true, type: true } },
           },
           orderBy: { createdAt: 'desc' },
-          take: 20,
+          take: 50,
         }),
         prisma.depositRequest.findMany({
           where: { userId: targetUserId },
@@ -562,13 +564,13 @@ adminRouter.get(
             updatedAt: true,
           },
           orderBy: { createdAt: 'desc' },
-          take: 20,
+          take: 50,
         }),
         prisma.transaction.findMany({
           where: { userId: targetUserId },
           select: { id: true, type: true, amount: true, balanceAfter: true, orderId: true, description: true, createdAt: true },
           orderBy: { createdAt: 'desc' },
-          take: 20,
+          take: 50,
         }),
         prisma.auditLog.findMany({
           where: { OR: [{ actorId: targetUserId }, { targetId: targetUserId }] },
@@ -586,7 +588,7 @@ adminRouter.get(
             target: { select: { id: true, username: true, email: true, role: true } },
           },
           orderBy: { createdAt: 'desc' },
-          take: 20,
+          take: 50,
         }),
       ]);
 
