@@ -1,24 +1,24 @@
 import { Router, Request, Response } from 'express';
 import { subscribeToUserEvents } from '../../../shared/infrastructure/event-bus';
 import { logger } from '../../../shared/infrastructure/logger';
+import { redis } from '../../../shared/infrastructure/redis';
 
 export const userStreamRouter = Router();
 
-// ─────────────────────────────────────────────────────────────
-// GET /api/v1/users/stream
-//
-// Server-Sent Events endpoint for user-level events (deposits,
-// account changes, etc.). Parallel to the order stream but on
-// a dedicated Redis channel to avoid coupling.
-//
-// Protocol:
-//   - Client opens: new EventSource('/api/v1/users/stream')
-//   - Server sends: event: deposit_success\ndata: {json}\n\n
-//   - Heartbeat every 30s to keep connection alive
-//   - Client disconnects: unsubscribe from Redis channel
-// ─────────────────────────────────────────────────────────────
-userStreamRouter.get('/stream', (req: Request, res: Response) => {
+const MAX_SSE_CONNECTIONS_PER_USER = 3;
+
+userStreamRouter.get('/stream', async (req: Request, res: Response) => {
   const userId = req.user!.id;
+  const connKey = `3f:sse:users:${userId}`;
+
+  const count = await redis.incr(connKey);
+  await redis.expire(connKey, 300);
+
+  if (count > MAX_SSE_CONNECTIONS_PER_USER) {
+    await redis.decr(connKey);
+    res.status(429).json({ error: 'Too many active SSE connections' });
+    return;
+  }
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -40,9 +40,10 @@ userStreamRouter.get('/stream', (req: Request, res: Response) => {
 
   logger.info('User SSE client connected', { userId });
 
-  req.on('close', () => {
+  req.on('close', async () => {
     clearInterval(heartbeat);
     unsubscribe();
+    await redis.decr(connKey);
     logger.info('User SSE client disconnected', { userId });
   });
 });

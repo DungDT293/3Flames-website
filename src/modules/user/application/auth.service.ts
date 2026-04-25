@@ -25,6 +25,20 @@ function maskPhone(phone: string): string {
   return phone.length <= 4 ? '***' : `${phone.slice(0, 2)}***${phone.slice(-2)}`;
 }
 
+const OTP_SEND_LIMIT = 3;
+const OTP_SEND_WINDOW_S = 10 * 60; // same as OTP TTL
+
+async function checkOtpSendLimit(email: string): Promise<void> {
+  const key = `3f:otp:send:${email}`;
+  const count = await redis.incr(key);
+  if (count === 1) await redis.expire(key, OTP_SEND_WINDOW_S);
+  if (count > OTP_SEND_LIMIT) throw new OtpSendLimitError();
+}
+
+async function clearOtpSendLimit(email: string): Promise<void> {
+  await redis.del(`3f:otp:send:${email}`);
+}
+
 async function checkOtpAttempts(email: string): Promise<void> {
   const key = `3f:otp:attempts:${email}`;
   const attempts = await redis.incr(key);
@@ -43,6 +57,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 
 export class AuthService {
   async register(email: string, username: string, password: string, phone?: string) {
+    await checkOtpSendLimit(email);
     const normalizedUsername = username.trim().toLowerCase();
     const existing = await prisma.user.findFirst({
       where: {
@@ -169,6 +184,8 @@ export class AuthService {
   }
 
   async resendOtp(email: string) {
+    await checkOtpSendLimit(email);
+
     const user = await prisma.user.findUnique({
       where: { email },
       select: { id: true, email: true, isEmailVerified: true },
@@ -211,6 +228,7 @@ export class AuthService {
   }
 
   async forgotPassword(email: string) {
+    await checkOtpSendLimit(email);
     const user = await prisma.user.findUnique({
       where: { email },
       select: { id: true, email: true, status: true },
@@ -374,5 +392,12 @@ export class OtpRateLimitError extends Error {
   constructor() {
     super('Quá nhiều lần thử sai mã OTP. Vui lòng yêu cầu mã mới.');
     this.name = 'OtpRateLimitError';
+  }
+}
+
+export class OtpSendLimitError extends Error {
+  constructor() {
+    super('Đã gửi quá nhiều mã OTP. Vui lòng thử lại sau 10 phút.');
+    this.name = 'OtpSendLimitError';
   }
 }

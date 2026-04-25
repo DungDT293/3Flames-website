@@ -14,12 +14,17 @@ async function bootstrap() {
   }
   logger.info('Redis connected');
 
+  const allowedOrigin = process.env.FRONTEND_ORIGIN;
+  if (!allowedOrigin && config.env === 'production') {
+    throw new Error('Missing required environment variable: FRONTEND_ORIGIN');
+  }
+
   const app = express();
 
   // ── Global middleware ──────────────────────────────────
   app.use(helmet());
   app.use(cors({
-    origin: process.env.FRONTEND_ORIGIN || 'http://localhost:3001',
+    origin: allowedOrigin || 'http://localhost:3001',
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization'],
   }));

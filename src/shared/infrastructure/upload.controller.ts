@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { UploadService } from './upload.service';
+import { uploadLimiter } from './middleware/rate-limit.middleware';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -15,6 +16,7 @@ export const uploadRouter = Router();
 // Generic file upload endpoint — stores in R2, returns public URL
 uploadRouter.post(
   '/',
+  uploadLimiter,
   upload.single('file'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {

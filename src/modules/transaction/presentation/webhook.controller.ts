@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { Prisma, TransactionType } from '@prisma/client';
 import { config } from '../../../config';
 import { prisma } from '../../../shared/infrastructure/database';
+import { redis } from '../../../shared/infrastructure/redis';
 import { logger } from '../../../shared/infrastructure/logger';
 import { validate } from '../../../shared/infrastructure/middleware/validate.middleware';
 import { BalanceService } from '../application/balance.service';
@@ -13,17 +14,6 @@ const balanceService = new BalanceService();
 
 export const webhookRouter = Router();
 
-// ─────────────────────────────────────────────────────────────
-// HMAC SIGNATURE VERIFICATION MIDDLEWARE
-//
-// The payment gateway signs the raw JSON body with HMAC-SHA256
-// using our shared secret. We reconstruct the signature and
-// compare with constant-time equality to prevent:
-//   1. Spoofed deposit attacks (attacker crafts fake callbacks)
-//   2. Timing attacks (leaking signature bytes via response time)
-//
-// Expected header: X-Signature: sha256=<hex digest>
-// ─────────────────────────────────────────────────────────────
 function verifyWebhookSignature(
   req: Request,
   res: Response,
@@ -32,16 +22,12 @@ function verifyWebhookSignature(
   const signatureHeader = req.headers['x-signature'] as string | undefined;
 
   if (!signatureHeader || !signatureHeader.startsWith('sha256=')) {
-    logger.warn('Webhook received without valid signature header', {
-      ip: req.ip,
-    });
+    logger.warn('Webhook received without valid signature header', { ip: req.ip });
     res.status(401).json({ error: 'Missing or malformed X-Signature header' });
     return;
   }
 
-  const receivedSignature = signatureHeader.slice(7); // strip "sha256="
-
-  // Reconstruct HMAC from raw body bytes (not re-serialized JSON)
+  const receivedSignature = signatureHeader.slice(7);
   const rawBody = (req as Request & { rawBody?: Buffer }).rawBody;
   if (!rawBody) {
     res.status(500).json({ error: 'Raw body not available for signature verification' });
@@ -53,7 +39,6 @@ function verifyWebhookSignature(
     .update(rawBody)
     .digest('hex');
 
-  // Constant-time comparison to prevent timing attacks
   const receivedBuffer = Buffer.from(receivedSignature, 'hex');
   const expectedBuffer = Buffer.from(expectedSignature, 'hex');
 
@@ -61,9 +46,7 @@ function verifyWebhookSignature(
     receivedBuffer.length !== expectedBuffer.length ||
     !crypto.timingSafeEqual(receivedBuffer, expectedBuffer)
   ) {
-    logger.warn('Webhook signature verification failed', {
-      ip: req.ip,
-    });
+    logger.warn('Webhook signature verification failed', { ip: req.ip });
     res.status(403).json({ error: 'Invalid signature' });
     return;
   }
@@ -71,17 +54,6 @@ function verifyWebhookSignature(
   next();
 }
 
-// ─────────────────────────────────────────────────────────────
-// POST /api/v1/webhooks/payment
-//
-// Receives callbacks from crypto payment gateways (Cryptomus,
-// Coinbase Commerce, etc). Flow:
-//   1. Verify HMAC-SHA256 signature (middleware above)
-//   2. Validate payload structure (Zod)
-//   3. Idempotency check (prevent double-credit from retries)
-//   4. Credit user balance via BalanceService (FOR UPDATE lock)
-//   5. Log DEPOSIT transaction
-// ─────────────────────────────────────────────────────────────
 webhookRouter.post(
   '/payment',
   verifyWebhookSignature,
@@ -96,19 +68,29 @@ webhookRouter.post(
       amount: payload.amount,
     });
 
-    // Only process completed payments
     if (payload.event !== 'PAYMENT_COMPLETED') {
       res.json({ status: 'acknowledged', event: payload.event });
       return;
     }
 
+    // Distributed lock — prevents concurrent webhooks with same payment_id from racing
+    const lockKey = `3f:webhook:lock:${payload.payment_id}`;
+    const lockToken = crypto.randomBytes(16).toString('hex');
+    const acquired = await redis.set(lockKey, lockToken, 'EX', 60, 'NX');
+
+    if (!acquired) {
+      logger.warn('Webhook concurrent request blocked by lock', { paymentId: payload.payment_id });
+      res.status(409).json({ status: 'processing', message: 'Payment is currently being processed' });
+      return;
+    }
+
     try {
-      // Idempotency: check by unique providerPaymentId on DepositRequest
+      // Idempotency check inside the lock — safe from race conditions now
       const existingDeposit = await prisma.depositRequest.findUnique({
         where: { providerPaymentId: payload.payment_id },
       });
 
-      if (existingDeposit && existingDeposit.status === 'CONFIRMED') {
+      if (existingDeposit?.status === 'CONFIRMED') {
         logger.warn('Duplicate webhook payment, already processed', {
           paymentId: payload.payment_id,
           depositRequestId: existingDeposit.id,
@@ -117,7 +99,6 @@ webhookRouter.post(
         return;
       }
 
-      // Verify user exists
       const user = await prisma.user.findUnique({
         where: { id: payload.user_id },
         select: { id: true, status: true },
@@ -132,7 +113,16 @@ webhookRouter.post(
         return;
       }
 
-      // Credit the user's balance (through BalanceService with FOR UPDATE lock)
+      if (user.status !== 'ACTIVE') {
+        logger.warn('Webhook payment rejected — user not active', {
+          paymentId: payload.payment_id,
+          userId: payload.user_id,
+          status: user.status,
+        });
+        res.status(403).json({ error: 'User account is not active' });
+        return;
+      }
+
       const amount = new Prisma.Decimal(payload.amount);
       const result = await balanceService.credit(
         payload.user_id,
@@ -141,13 +131,8 @@ webhookRouter.post(
         `Deposit via payment gateway — Payment ID: ${payload.payment_id} — ${payload.amount} ${payload.currency}`,
       );
 
-      // Mark deposit request as confirmed (if one exists for this payment)
       await prisma.depositRequest.updateMany({
-        where: {
-          userId: payload.user_id,
-          status: 'PENDING',
-          providerPaymentId: null,
-        },
+        where: { userId: payload.user_id, status: 'PENDING', providerPaymentId: null },
         data: {
           providerPaymentId: payload.payment_id,
           status: 'CONFIRMED',
@@ -163,7 +148,6 @@ webhookRouter.post(
         transactionId: result.transactionId,
       });
 
-      // Publish real-time event to frontend via Redis pub/sub → SSE
       await publishUserEvent(payload.user_id, {
         type: 'DEPOSIT_SUCCESS',
         amount: amount.toString(),
@@ -178,11 +162,12 @@ webhookRouter.post(
         newBalance: result.newBalance.toString(),
       });
     } catch (error) {
-      logger.error('Webhook payment processing failed', {
-        paymentId: payload.payment_id,
-        error,
-      });
+      logger.error('Webhook payment processing failed', { paymentId: payload.payment_id, error });
       next(error);
+    } finally {
+      // Release lock only if we still own it
+      const current = await redis.get(lockKey);
+      if (current === lockToken) await redis.del(lockKey);
     }
   },
 );

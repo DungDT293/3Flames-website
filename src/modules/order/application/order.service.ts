@@ -30,13 +30,11 @@ export class OrderService {
     });
 
     if (!service || !service.isActive) {
-      throw new Error('Service not found or inactive');
+      throw new ServiceNotFoundError();
     }
 
     if (input.quantity < service.minQuantity || input.quantity > service.maxQuantity) {
-      throw new Error(
-        `Quantity must be between ${service.minQuantity} and ${service.maxQuantity}`,
-      );
+      throw new InvalidQuantityError(service.minQuantity, service.maxQuantity);
     }
 
     // Calculate charge: (sellingPrice / 1000) * quantity
@@ -150,5 +148,19 @@ export class OrderService {
       }
       throw error;
     }
+  }
+}
+
+export class ServiceNotFoundError extends Error {
+  constructor() {
+    super('Service not found or inactive');
+    this.name = 'ServiceNotFoundError';
+  }
+}
+
+export class InvalidQuantityError extends Error {
+  constructor(public readonly min: number, public readonly max: number) {
+    super(`Quantity must be between ${min} and ${max}`);
+    this.name = 'InvalidQuantityError';
   }
 }

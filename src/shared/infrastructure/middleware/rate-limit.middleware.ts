@@ -42,3 +42,16 @@ export const orderLimiter = rateLimit({
     prefix: '3f:rl:order:',
   }),
 });
+
+// File uploads: 10 uploads per minute per IP
+export const uploadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Upload rate limit exceeded, please slow down' },
+  store: new RedisStore({
+    sendCommand: sendRedisCommand,
+    prefix: '3f:rl:upload:',
+  }),
+});

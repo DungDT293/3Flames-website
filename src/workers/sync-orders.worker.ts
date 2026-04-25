@@ -128,74 +128,85 @@ export async function syncOrders(): Promise<void> {
 
         // ── REFUND LOGIC ────────────────────────────────────
         if (newStatus === OrderStatus.CANCELED) {
-          // Full refund — service was never delivered
-          await balanceService.credit(
-            order.userId,
-            order.charge,
-            TransactionType.REFUND,
-            `Auto-refund: order #${order.id.slice(0, 8)} canceled by provider`,
-            order.id,
-          );
+          const alreadyRefunded = await prisma.transaction.findFirst({
+            where: { orderId: order.id, type: TransactionType.REFUND },
+            select: { id: true },
+          });
+
+          if (!alreadyRefunded) {
+            await balanceService.credit(
+              order.userId,
+              order.charge,
+              TransactionType.REFUND,
+              `Auto-refund: order #${order.id.slice(0, 8)} canceled by provider`,
+              order.id,
+            );
+
+            refunded++;
+            logger.info('Full refund issued for canceled order', {
+              orderId: order.id,
+              userId: order.userId,
+              amount: order.charge.toString(),
+            });
+
+            await publishOrderEvent(order.userId, {
+              orderId: order.id,
+              status: 'REFUNDED',
+              charge: order.charge.toString(),
+              refundAmount: order.charge.toString(),
+              updatedAt: new Date().toISOString(),
+            });
+          }
 
           await prisma.order.update({
             where: { id: order.id },
             data: { status: OrderStatus.REFUNDED },
           });
-
-          refunded++;
-          logger.info('Full refund issued for canceled order', {
-            orderId: order.id,
-            userId: order.userId,
-            amount: order.charge.toString(),
-          });
-
-          await publishOrderEvent(order.userId, {
-            orderId: order.id,
-            status: 'REFUNDED',
-            charge: order.charge.toString(),
-            refundAmount: order.charge.toString(),
-            updatedAt: new Date().toISOString(),
-          });
         }
 
         if (newStatus === OrderStatus.PARTIAL) {
-          // Partial refund — calculate based on undelivered quantity
           const remains = providerStatus.remains
             ? parseInt(providerStatus.remains, 10)
             : 0;
 
           if (remains > 0) {
-            // refundAmount = (charge / quantity) * remains
-            const perUnitCost = new Prisma.Decimal(order.charge.toString()).div(
-              order.quantity,
-            );
-            const refundAmount = perUnitCost
-              .mul(remains)
-              .toDecimalPlaces(6);
-
-            await balanceService.credit(
-              order.userId,
-              refundAmount,
-              TransactionType.REFUND,
-              `Auto-refund: partial delivery for order #${order.id.slice(0, 8)}, ${remains} units undelivered`,
-              order.id,
-            );
-
-            refunded++;
-            logger.info('Partial refund issued', {
-              orderId: order.id,
-              userId: order.userId,
-              refundAmount: refundAmount.toString(),
-              remains,
+            const alreadyRefunded = await prisma.transaction.findFirst({
+              where: { orderId: order.id, type: TransactionType.REFUND },
+              select: { id: true },
             });
 
-            await publishOrderEvent(order.userId, {
-              orderId: order.id,
-              status: 'PARTIAL',
-              remains,
-              refundAmount: refundAmount.toString(),
-              updatedAt: new Date().toISOString(),
-            });
+            if (!alreadyRefunded) {
+              const perUnitCost = new Prisma.Decimal(order.charge.toString()).div(
+                order.quantity,
+              );
+              const refundAmount = perUnitCost
+                .mul(remains)
+                .toDecimalPlaces(6);
+
+              await balanceService.credit(
+                order.userId,
+                refundAmount,
+                TransactionType.REFUND,
+                `Auto-refund: partial delivery for order #${order.id.slice(0, 8)}, ${remains} units undelivered`,
+                order.id,
+              );
+
+              refunded++;
+              logger.info('Partial refund issued', {
+                orderId: order.id,
+                userId: order.userId,
+                refundAmount: refundAmount.toString(),
+                remains,
+              });
+
+              await publishOrderEvent(order.userId, {
+                orderId: order.id,
+                status: 'PARTIAL',
+                remains,
+                refundAmount: refundAmount.toString(),
+                updatedAt: new Date().toISOString(),
+              });
+            }
           }
         }
       } catch (error) {

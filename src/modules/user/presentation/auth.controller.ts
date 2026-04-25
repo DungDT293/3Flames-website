@@ -10,6 +10,7 @@ import {
   EmailNotVerifiedError,
   InvalidOtpError,
   OtpRateLimitError,
+  OtpSendLimitError,
 } from '../application/auth.service';
 import { OtpEmailDeliveryError } from '../../../shared/infrastructure/email.service';
 
@@ -35,6 +36,10 @@ authRouter.post(
         ...(process.env.NODE_ENV !== 'production' && result.devOtp ? { devOtp: result.devOtp } : {}),
       });
     } catch (error) {
+      if (error instanceof OtpSendLimitError) {
+        res.status(429).json({ error: error.message });
+        return;
+      }
       if (error instanceof DuplicateFieldError) {
         res.status(409).json({ error: error.message, field: error.field });
         return;
@@ -79,6 +84,10 @@ authRouter.post(
       const result = await authService.forgotPassword(email);
       res.json({ message: 'Mã đặt lại mật khẩu đã được gửi', success: result.success, email: result.email, ...(process.env.NODE_ENV !== 'production' && result.devOtp ? { devOtp: result.devOtp } : {}) });
     } catch (error) {
+      if (error instanceof OtpSendLimitError) {
+        res.status(429).json({ error: error.message });
+        return;
+      }
       if (error instanceof InvalidCredentialsError) {
         res.status(404).json({ error: 'Email not found' });
         return;
@@ -204,6 +213,10 @@ authRouter.post(
         ...(process.env.NODE_ENV !== 'production' && result.devOtp ? { devOtp: result.devOtp } : {}),
       });
     } catch (error) {
+      if (error instanceof OtpSendLimitError) {
+        res.status(429).json({ error: error.message });
+        return;
+      }
       if (error instanceof InvalidCredentialsError) {
         res.status(404).json({ error: 'Email not found' });
         return;
