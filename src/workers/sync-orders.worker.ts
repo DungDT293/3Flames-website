@@ -28,7 +28,7 @@ const PROVIDER_STATUS_MAP: Record<string, OrderStatus> = {
   Cancelled: OrderStatus.CANCELED,
 };
 
-async function syncOrders(): Promise<void> {
+export async function syncOrders(): Promise<void> {
   const startTime = Date.now();
   logger.info('Starting order sync...');
 
@@ -217,15 +217,15 @@ async function syncOrders(): Promise<void> {
   });
 }
 
-// ── Entrypoint ──────────────────────────────────────────────
-async function main() {
-  logger.info('Sync Orders Worker started');
-  await syncOrders();
-  await prisma.$disconnect();
-  process.exit(0);
+// ── Entrypoint (only when run directly, not imported) ───────
+if (require.main === module) {
+  (async () => {
+    logger.info('Sync Orders Worker started');
+    await syncOrders();
+    await prisma.$disconnect();
+    process.exit(0);
+  })().catch((err) => {
+    logger.error('Sync Orders Worker crashed', { error: err });
+    process.exit(1);
+  });
 }
-
-main().catch((err) => {
-  logger.error('Sync Orders Worker crashed', { error: err });
-  process.exit(1);
-});

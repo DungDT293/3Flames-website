@@ -14,12 +14,31 @@ import { ProviderService } from '../modules/provider/domain/provider-api.interfa
 
 const provider = new TheYTlabApiClient();
 
+const PRICING_MARGIN_KEY = 'pricing.defaultProfitMargin';
+
 function calculateSellingPrice(
   originalPrice: Prisma.Decimal,
-  marginPercent: number,
+  marginPercent: Prisma.Decimal.Value,
 ): Prisma.Decimal {
   const margin = new Prisma.Decimal(marginPercent).div(100).plus(1);
   return originalPrice.mul(margin).toDecimalPlaces(6);
+}
+
+async function getDefaultProfitMargin(): Promise<Prisma.Decimal> {
+  const setting = await prisma.adminSetting.findUnique({ where: { key: PRICING_MARGIN_KEY } });
+  const raw = setting?.value;
+  if (typeof raw === 'number' || typeof raw === 'string') return new Prisma.Decimal(raw);
+  if (raw && typeof raw === 'object' && 'margin' in raw) {
+    return new Prisma.Decimal((raw as { margin: number | string }).margin);
+  }
+  return new Prisma.Decimal(config.pricing.defaultProfitMargin);
+}
+
+const ALLOWED_CATEGORY_KEYWORDS = ['youtube', 'facebook'];
+
+function isAllowedCategory(category: string): boolean {
+  const lower = category.toLowerCase();
+  return ALLOWED_CATEGORY_KEYWORDS.some((kw) => lower.includes(kw));
 }
 
 function mapServiceType(type: string): 'DEFAULT' | 'SUBSCRIPTION' | 'CUSTOM_COMMENTS' | 'PACKAGE' {
@@ -32,7 +51,7 @@ function mapServiceType(type: string): 'DEFAULT' | 'SUBSCRIPTION' | 'CUSTOM_COMM
   return typeMap[type] || 'DEFAULT';
 }
 
-async function syncServices(): Promise<void> {
+export async function syncServices(): Promise<void> {
   const startTime = Date.now();
   logger.info('Starting service sync...');
 
@@ -48,17 +67,19 @@ async function syncServices(): Promise<void> {
     return;
   }
 
-  logger.info(`Fetched ${services.length} services from provider`);
+  const allCount = services.length;
+  services = services.filter((s) => isAllowedCategory(s.category));
+  logger.info(`Fetched ${allCount} services from provider, ${services.length} match allowed categories (YouTube, Facebook)`);
 
   let created = 0;
   let updated = 0;
   let unchanged = 0;
 
-  const margin = config.pricing.defaultProfitMargin;
+  const globalMargin = await getDefaultProfitMargin();
 
   for (const svc of services) {
     const originalPrice = new Prisma.Decimal(svc.rate);
-    const sellingPrice = calculateSellingPrice(originalPrice, margin);
+    const sellingPrice = calculateSellingPrice(originalPrice, globalMargin);
 
     try {
       const existing = await prisma.service.findUnique({
@@ -75,7 +96,8 @@ async function syncServices(): Promise<void> {
             description: svc.description || null,
             originalPrice,
             sellingPrice,
-            profitMargin: margin,
+            profitMargin: globalMargin,
+            isMarginOverride: false,
             minQuantity: parseInt(svc.min, 10),
             maxQuantity: parseInt(svc.max, 10),
             type: mapServiceType(svc.type),
@@ -85,33 +107,41 @@ async function syncServices(): Promise<void> {
         created++;
       } else {
         // Existing service — check if provider price changed
+        const effectiveMargin = existing.isMarginOverride ? existing.profitMargin : globalMargin;
         const priceChanged = !existing.originalPrice.equals(originalPrice);
+        const marginChanged = !existing.isMarginOverride && !existing.profitMargin.equals(globalMargin);
         const detailsChanged =
           existing.name !== svc.name ||
           existing.category !== svc.category ||
+          existing.description !== (svc.description || null) ||
           existing.minQuantity !== parseInt(svc.min, 10) ||
-          existing.maxQuantity !== parseInt(svc.max, 10);
+          existing.maxQuantity !== parseInt(svc.max, 10) ||
+          existing.type !== mapServiceType(svc.type) ||
+          !existing.isActive;
 
-        if (priceChanged || detailsChanged) {
+        if (priceChanged || marginChanged || detailsChanged) {
           const updateData: Prisma.ServiceUpdateInput = {
             name: svc.name,
             category: svc.category,
             description: svc.description || null,
             minQuantity: parseInt(svc.min, 10),
             maxQuantity: parseInt(svc.max, 10),
+            type: mapServiceType(svc.type),
+            isActive: true,
           };
 
-          if (priceChanged) {
-            // CRITICAL: Recalculate selling price to maintain profit margin
+          if (priceChanged || marginChanged) {
             updateData.originalPrice = originalPrice;
-            updateData.sellingPrice = calculateSellingPrice(originalPrice, margin);
-            updateData.profitMargin = margin;
+            updateData.sellingPrice = calculateSellingPrice(originalPrice, effectiveMargin);
+            updateData.profitMargin = effectiveMargin;
 
-            logger.warn('Service price changed at provider', {
+            logger.warn('Service retail price recalculated', {
               serviceId: svc.serviceId,
               name: svc.name,
               oldPrice: existing.originalPrice.toString(),
               newPrice: originalPrice.toString(),
+              margin: effectiveMargin.toString(),
+              isMarginOverride: existing.isMarginOverride,
               newSellingPrice: updateData.sellingPrice.toString(),
             });
           }
@@ -133,25 +163,42 @@ async function syncServices(): Promise<void> {
     }
   }
 
+  // Deactivate services no longer in provider catalog
+  const activeProviderIds = new Set(services.map((s) => s.serviceId));
+  const deactivated = await prisma.service.updateMany({
+    where: {
+      isActive: true,
+      providerServiceId: { notIn: [...activeProviderIds] },
+    },
+    data: { isActive: false },
+  });
+
+  if (deactivated.count > 0) {
+    logger.warn('Deactivated services removed by provider', {
+      count: deactivated.count,
+    });
+  }
+
   const elapsed = Date.now() - startTime;
   logger.info('Service sync completed', {
     created,
     updated,
     unchanged,
+    deactivated: deactivated.count,
     total: services.length,
     durationMs: elapsed,
   });
 }
 
-// ── Entrypoint ──────────────────────────────────────────────
-async function main() {
-  logger.info('Sync Services Worker started');
-  await syncServices();
-  await prisma.$disconnect();
-  process.exit(0);
+// ── Entrypoint (only when run directly, not imported) ───────
+if (require.main === module) {
+  (async () => {
+    logger.info('Sync Services Worker started');
+    await syncServices();
+    await prisma.$disconnect();
+    process.exit(0);
+  })().catch((err) => {
+    logger.error('Sync Services Worker crashed', { error: err });
+    process.exit(1);
+  });
 }
-
-main().catch((err) => {
-  logger.error('Sync Services Worker crashed', { error: err });
-  process.exit(1);
-});

@@ -6,6 +6,7 @@ import { prisma } from '../../../shared/infrastructure/database';
 import { logger } from '../../../shared/infrastructure/logger';
 import { validate } from '../../../shared/infrastructure/middleware/validate.middleware';
 import { BalanceService } from '../application/balance.service';
+import { publishUserEvent } from '../../../shared/infrastructure/event-bus';
 import { paymentWebhookSchema, PaymentWebhookPayload } from './schemas/webhook.schema';
 
 const balanceService = new BalanceService();
@@ -40,10 +41,16 @@ function verifyWebhookSignature(
 
   const receivedSignature = signatureHeader.slice(7); // strip "sha256="
 
-  // Reconstruct HMAC from raw body
+  // Reconstruct HMAC from raw body bytes (not re-serialized JSON)
+  const rawBody = (req as Request & { rawBody?: Buffer }).rawBody;
+  if (!rawBody) {
+    res.status(500).json({ error: 'Raw body not available for signature verification' });
+    return;
+  }
+
   const expectedSignature = crypto
     .createHmac('sha256', config.webhook.secret)
-    .update(JSON.stringify(req.body))
+    .update(rawBody)
     .digest('hex');
 
   // Constant-time comparison to prevent timing attacks
@@ -96,20 +103,17 @@ webhookRouter.post(
     }
 
     try {
-      // Idempotency: check if this payment_id was already processed
-      const existingTx = await prisma.transaction.findFirst({
-        where: {
-          description: { contains: payload.payment_id },
-          type: TransactionType.DEPOSIT,
-        },
+      // Idempotency: check by unique providerPaymentId on DepositRequest
+      const existingDeposit = await prisma.depositRequest.findUnique({
+        where: { providerPaymentId: payload.payment_id },
       });
 
-      if (existingTx) {
+      if (existingDeposit && existingDeposit.status === 'CONFIRMED') {
         logger.warn('Duplicate webhook payment, already processed', {
           paymentId: payload.payment_id,
-          existingTransactionId: existingTx.id,
+          depositRequestId: existingDeposit.id,
         });
-        res.json({ status: 'already_processed', transactionId: existingTx.id });
+        res.json({ status: 'already_processed', depositRequestId: existingDeposit.id });
         return;
       }
 
@@ -137,12 +141,35 @@ webhookRouter.post(
         `Deposit via payment gateway — Payment ID: ${payload.payment_id} — ${payload.amount} ${payload.currency}`,
       );
 
+      // Mark deposit request as confirmed (if one exists for this payment)
+      await prisma.depositRequest.updateMany({
+        where: {
+          userId: payload.user_id,
+          status: 'PENDING',
+          providerPaymentId: null,
+        },
+        data: {
+          providerPaymentId: payload.payment_id,
+          status: 'CONFIRMED',
+          transactionId: result.transactionId,
+        },
+      });
+
       logger.info('Webhook deposit processed successfully', {
         paymentId: payload.payment_id,
         userId: payload.user_id,
         amount: payload.amount,
         newBalance: result.newBalance.toString(),
         transactionId: result.transactionId,
+      });
+
+      // Publish real-time event to frontend via Redis pub/sub → SSE
+      await publishUserEvent(payload.user_id, {
+        type: 'DEPOSIT_SUCCESS',
+        amount: amount.toString(),
+        newBalance: result.newBalance.toString(),
+        transactionId: result.transactionId,
+        timestamp: new Date().toISOString(),
       });
 
       res.json({

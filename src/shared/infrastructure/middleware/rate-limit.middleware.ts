@@ -2,6 +2,8 @@ import rateLimit from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import { redis } from '../redis';
 
+const sendRedisCommand = (...args: string[]) => redis.call(args[0], ...args.slice(1)) as never;
+
 // General API rate limit: 100 requests per minute per IP
 export const globalLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -10,7 +12,7 @@ export const globalLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later' },
   store: new RedisStore({
-    sendCommand: (...args: string[]) => redis.call(...args) as never,
+    sendCommand: sendRedisCommand,
     prefix: '3f:rl:global:',
   }),
 });
@@ -23,7 +25,7 @@ export const authLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many auth attempts, try again in 15 minutes' },
   store: new RedisStore({
-    sendCommand: (...args: string[]) => redis.call(...args) as never,
+    sendCommand: sendRedisCommand,
     prefix: '3f:rl:auth:',
   }),
 });
@@ -36,7 +38,7 @@ export const orderLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Order rate limit exceeded, please slow down' },
   store: new RedisStore({
-    sendCommand: (...args: string[]) => redis.call(...args) as never,
+    sendCommand: sendRedisCommand,
     prefix: '3f:rl:order:',
   }),
 });

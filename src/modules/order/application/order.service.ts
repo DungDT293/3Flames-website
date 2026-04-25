@@ -44,6 +44,10 @@ export class OrderService {
       .div(1000)
       .mul(input.quantity)
       .toDecimalPlaces(6);
+    const cost = service.originalPrice
+      .div(1000)
+      .mul(input.quantity)
+      .toDecimalPlaces(6);
 
     // Create order record first (PENDING state, no charge yet)
     const order = await prisma.order.create({
@@ -53,6 +57,7 @@ export class OrderService {
         link: input.link,
         quantity: input.quantity,
         charge,
+        cost,
         status: OrderStatus.PENDING,
       },
     });
@@ -67,20 +72,62 @@ export class OrderService {
       );
 
       // Place order with provider
-      const providerResult = await this.providerApi.placeOrder({
-        serviceId: service.providerServiceId,
-        link: input.link,
-        quantity: input.quantity,
-      });
+      let providerResult;
+      try {
+        providerResult = await this.providerApi.placeOrder({
+          serviceId: service.providerServiceId,
+          link: input.link,
+          quantity: input.quantity,
+        });
+      } catch (providerError) {
+        // Provider failed BEFORE accepting the order — safe to refund
+        try {
+          await this.balanceService.credit(
+            input.userId,
+            charge,
+            'REFUND' as any,
+            `Auto-refund: provider error for order #${order.id.slice(0, 8)}`,
+            order.id,
+          );
+        } catch (refundError) {
+          logger.error('CRITICAL: Failed to auto-refund after provider error', {
+            orderId: order.id,
+            userId: input.userId,
+            charge: charge.toString(),
+            refundError,
+          });
+        }
 
-      // Update order with provider's order ID, move to PROCESSING
-      await prisma.order.update({
-        where: { id: order.id },
-        data: {
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { status: OrderStatus.ERROR },
+        });
+
+        throw providerError;
+      }
+
+      // Provider succeeded — update local DB
+      try {
+        await prisma.order.update({
+          where: { id: order.id },
+          data: {
+            apiOrderId: providerResult.orderId,
+            status: OrderStatus.PROCESSING,
+          },
+        });
+      } catch (dbError) {
+        // Provider accepted the order but local DB update failed.
+        // Do NOT refund — the provider IS processing the order.
+        // Mark as pending reconciliation so the sync worker can fix it.
+        logger.error('CRITICAL: Provider accepted order but local DB update failed — DO NOT REFUND', {
+          orderId: order.id,
           apiOrderId: providerResult.orderId,
-          status: OrderStatus.PROCESSING,
-        },
-      });
+          userId: input.userId,
+          charge: charge.toString(),
+          dbError,
+        });
+        throw dbError;
+      }
 
       logger.info('Order placed successfully', {
         orderId: order.id,
@@ -95,38 +142,12 @@ export class OrderService {
         newBalance: balanceResult.newBalance,
       };
     } catch (error) {
-      // If provider call fails AFTER balance deduction, refund and mark ERROR
       if (error instanceof InsufficientBalanceError) {
         await prisma.order.update({
           where: { id: order.id },
           data: { status: OrderStatus.CANCELED },
         });
-        throw error;
       }
-
-      // Provider failed — auto-refund
-      try {
-        await this.balanceService.credit(
-          input.userId,
-          charge,
-          'REFUND',
-          `Auto-refund: provider error for order #${order.id.slice(0, 8)}`,
-          order.id,
-        );
-      } catch (refundError) {
-        logger.error('CRITICAL: Failed to auto-refund after provider error', {
-          orderId: order.id,
-          userId: input.userId,
-          charge: charge.toString(),
-          refundError,
-        });
-      }
-
-      await prisma.order.update({
-        where: { id: order.id },
-        data: { status: OrderStatus.ERROR },
-      });
-
       throw error;
     }
   }

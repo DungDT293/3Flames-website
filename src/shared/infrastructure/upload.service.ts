@@ -5,18 +5,24 @@ import {
 } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 import path from 'path';
-import { config } from '../../../config';
-import { logger } from '../../../shared/infrastructure/logger';
+import { config } from '../../config';
+import { logger } from './logger';
 
 const ALLOWED_MIME_TYPES = [
   'image/jpeg',
   'image/png',
   'image/webp',
-  'image/svg+xml',
   'image/gif',
 ];
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+
+const MAGIC_BYTES: Record<string, number[][]> = {
+  'image/jpeg': [[0xFF, 0xD8, 0xFF]],
+  'image/png': [[0x89, 0x50, 0x4E, 0x47]],
+  'image/webp': [[0x52, 0x49, 0x46, 0x46]], // "RIFF"
+  'image/gif': [[0x47, 0x49, 0x46, 0x38]],   // "GIF8"
+};
 
 // Cloudflare R2 uses an S3-compatible endpoint:
 // https://<ACCOUNT_ID>.r2.cloudflarestorage.com
@@ -56,6 +62,19 @@ export class UploadService {
       throw new Error(
         `Unsupported file type: ${mimeType}. Allowed: ${ALLOWED_MIME_TYPES.join(', ')}`,
       );
+    }
+
+    // Validate magic bytes to prevent MIME spoofing
+    const expectedMagic = MAGIC_BYTES[mimeType];
+    if (expectedMagic) {
+      const matchesMagic = expectedMagic.some((magic) =>
+        magic.every((byte, i) => buffer[i] === byte),
+      );
+      if (!matchesMagic) {
+        throw new Error(
+          `File content does not match declared type: ${mimeType}`,
+        );
+      }
     }
 
     if (buffer.length > MAX_FILE_SIZE) {

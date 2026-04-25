@@ -22,6 +22,7 @@ export const config = {
     host: process.env.REDIS_HOST || 'localhost',
     port: parseInt(process.env.REDIS_PORT || '6379', 10),
     password: process.env.REDIS_PASSWORD || undefined,
+    tls: process.env.REDIS_TLS === 'true',
   },
 
   jwt: {
@@ -30,8 +31,16 @@ export const config = {
   },
 
   provider: {
-    apiUrl: requireEnv('PROVIDER_API_URL'),
-    apiKey: requireEnv('PROVIDER_API_KEY'),
+    apiUrl: process.env.PROVIDER_API_URL || 'https://theytlab.com/api/v2',
+    apiKey: process.env.PROVIDER_API_KEY || '',
+  },
+
+  smtp: {
+    host: process.env.SMTP_HOST || '',
+    port: parseInt(process.env.SMTP_PORT || '587', 10),
+    user: process.env.SMTP_USER || '',
+    pass: process.env.SMTP_PASS || '',
+    from: process.env.SMTP_FROM || '3Flames <onboarding@resend.dev>',
   },
 
   r2: {
@@ -43,7 +52,13 @@ export const config = {
   },
 
   pricing: {
-    defaultProfitMargin: parseFloat(process.env.DEFAULT_PROFIT_MARGIN || '30'),
+    defaultProfitMargin: parseFloat(process.env.DEFAULT_PROFIT_MARGIN || '10'),
+  },
+
+  exchange: {
+    usdVndFallback: parseFloat(process.env.USD_VND_FALLBACK || '25000'),
+    cacheTtlMs: parseInt(process.env.EXCHANGE_RATE_CACHE_TTL_MS || '300000', 10),
+    apiUrl: process.env.EXCHANGE_RATE_API_URL || 'https://open.er-api.com/v6/latest/USD',
   },
 
   webhook: {
@@ -58,5 +73,10 @@ export const config = {
 
   tos: {
     currentVersion: process.env.CURRENT_TOS_VERSION || '1.0',
+  },
+
+  vietqr: {
+    bankBin: process.env.VIETQR_BANK_BIN || '',
+    accountNumber: process.env.VIETQR_ACCOUNT_NUMBER || '',
   },
 } as const;

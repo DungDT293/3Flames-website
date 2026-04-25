@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
-import { UploadService } from '../../../shared/infrastructure/upload.service';
+import { UploadService } from './upload.service';
 
 const upload = multer({
   storage: multer.memoryStorage(),

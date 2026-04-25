@@ -12,6 +12,7 @@ const connection = {
   host: config.redis.host,
   port: config.redis.port,
   password: config.redis.password,
+  tls: config.redis.tls ? {} : undefined,
 };
 
 async function startScheduler() {
@@ -28,8 +29,8 @@ async function startScheduler() {
     'sync-services',
     async () => {
       logger.info('Triggering service sync via scheduler');
-      // Dynamic import to isolate worker execution
       const { syncServices } = await import('./sync-services.worker');
+      await syncServices();
     },
     { connection, concurrency: 1 },
   );
@@ -48,6 +49,7 @@ async function startScheduler() {
     async () => {
       logger.info('Triggering order sync via scheduler');
       const { syncOrders } = await import('./sync-orders.worker');
+      await syncOrders();
     },
     { connection, concurrency: 1 },
   );

@@ -49,7 +49,6 @@ orderRouter.post(
         message: 'Order placed successfully',
         order: {
           id: result.orderId,
-          apiOrderId: result.apiOrderId,
           charge: result.charge.toString(),
         },
         newBalance: result.newBalance.toString(),
@@ -87,7 +86,6 @@ orderRouter.get(
         where,
         select: {
           id: true,
-          apiOrderId: true,
           link: true,
           quantity: true,
           charge: true,
@@ -124,10 +122,9 @@ orderRouter.get(
 // GET /api/v1/orders/:id
 orderRouter.get('/:id', async (req: Request, res: Response) => {
   const order = await prisma.order.findFirst({
-    where: { id: req.params.id, userId: req.user!.id },
+    where: { id: String(req.params.id), userId: req.user!.id },
     select: {
       id: true,
-      apiOrderId: true,
       link: true,
       quantity: true,
       charge: true,

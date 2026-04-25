@@ -20,36 +20,69 @@ model User {
   // All mutations MUST go through SELECT ... FOR UPDATE to prevent race conditions.
   balance      Decimal  @default(0) @db.Decimal(16, 6)
 
-  // Personal API key for programmatic access to 3Flames
-  apiKey       String?  @unique @map("api_key") @db.VarChar(64)
-
   role         UserRole @default(USER)
   status       UserStatus @default(ACTIVE)
 
   // Terms of Service version the user accepted at registration (or last update)
   acceptedTosVersion String @default("1.0") @map("accepted_tos_version") @db.VarChar(20)
+  isEmailVerified  Boolean   @default(false) @map("is_email_verified")
+  otpCode          String?   @map("otp_code") @db.VarChar(6)
+  otpExpiresAt     DateTime? @map("otp_expires_at")
 
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   orders       Order[]
   transactions Transaction[]
+  depositRequests DepositRequest[]
+  auditLogsAsActor AuditLog[] @relation("AuditActor")
+  auditLogsAsTarget AuditLog[] @relation("AuditTarget")
 
   @@index([email])
-  @@index([apiKey])
   @@index([status])
   @@map("users")
 }
 
 enum UserRole {
   USER
+  SUPPORT
   ADMIN
+  SUPER_ADMIN
 }
 
 enum UserStatus {
   ACTIVE
   SUSPENDED
   BANNED
+}
+
+model AuditLog {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  actorId   String?  @map("actor_id") @db.Uuid
+  actor     User?    @relation("AuditActor", fields: [actorId], references: [id])
+
+  targetId  String?  @map("target_id") @db.Uuid
+  target    User?    @relation("AuditTarget", fields: [targetId], references: [id])
+
+  action    String   @db.VarChar(100)
+  entity    String   @db.VarChar(100)
+
+  oldData   Json?    @map("old_data")
+  newData   Json?    @map("new_data")
+
+  ipAddress String?  @map("ip_address") @db.VarChar(45)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([actorId])
+  @@index([targetId])
+  @@index([action])
+  @@index([entity])
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([targetId, createdAt])
+  @@map("audit_logs")
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -73,6 +106,7 @@ model Service {
 
   // The margin applied when this price was last calculated
   profitMargin   Decimal       @default(30) @map("profit_margin") @db.Decimal(5, 2)
+  isMarginOverride Boolean     @default(false) @map("is_margin_override")
 
   minQuantity    Int           @map("min_quantity")
   maxQuantity    Int           @map("max_quantity")
@@ -98,6 +132,15 @@ enum ServiceType {
   PACKAGE
 }
 
+model AdminSetting {
+  key       String   @id @db.VarChar(100)
+  value     Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("admin_settings")
+}
+
 // ─────────────────────────────────────────────────────────────
 // ORDERS
 // ─────────────────────────────────────────────────────────────
@@ -119,6 +162,7 @@ model Order {
 
   // Exact amount deducted from user balance at order time
   charge       Decimal     @db.Decimal(16, 6)
+  cost         Decimal     @default(0) @db.Decimal(16, 6)
 
   status       OrderStatus @default(PENDING)
 
@@ -184,4 +228,40 @@ enum TransactionType {
   REFUND
   ADMIN_CREDIT
   ADMIN_DEBIT
+}
+
+// ─────────────────────────────────────────────────────────────
+// DEPOSIT REQUESTS (VietQR Payment Intent)
+// Tracks pending deposits before they are confirmed via webhook.
+// The memo field is the reconciliation key between QR and webhook.
+// ─────────────────────────────────────────────────────────────
+model DepositRequest {
+  id           String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  userId       String              @map("user_id") @db.Uuid
+  user         User                @relation(fields: [userId], references: [id])
+
+  memo         String              @unique @db.VarChar(50)
+  amountVnd    Int                 @map("amount_vnd")
+  status       DepositStatus       @default(PENDING)
+
+  providerPaymentId String?        @unique @map("provider_payment_id") @db.VarChar(200)
+  transactionId     String?        @map("transaction_id") @db.Uuid
+
+  expiresAt    DateTime            @map("expires_at")
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([memo])
+  @@index([status])
+  @@index([providerPaymentId])
+  @@map("deposit_requests")
+}
+
+enum DepositStatus {
+  PENDING
+  CONFIRMED
+  EXPIRED
+  FAILED
 }

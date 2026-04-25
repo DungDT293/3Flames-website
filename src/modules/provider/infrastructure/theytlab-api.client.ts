@@ -23,15 +23,39 @@ export class TheYTlabApiClient implements IProviderApiClient {
     this.http = axios.create({
       baseURL: config.provider.apiUrl,
       timeout: 30_000,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
   }
 
   async getServices(): Promise<ProviderService[]> {
-    const response = await this.post<ProviderService[]>({
+    const response = await this.post<
+      Array<{
+        service: number;
+        name: string;
+        type: string;
+        rate: string;
+        min: string;
+        max: string;
+        category: string;
+        description?: string;
+        dripfeed?: boolean;
+        refill?: boolean;
+        cancel?: boolean;
+      }>
+    >({
       action: 'services',
     });
-    return response;
+
+    return response.map((s) => ({
+      serviceId: String(s.service),
+      name: s.name,
+      category: s.category,
+      type: s.type,
+      rate: s.rate,
+      min: s.min,
+      max: s.max,
+      description: s.description,
+    }));
   }
 
   async placeOrder(request: PlaceOrderRequest): Promise<PlaceOrderResponse> {

@@ -29,14 +29,25 @@ src/
 
 ## Key Commands
 ```bash
-npm run dev              # Start dev server
-npm run build            # Compile TypeScript
+npm run dev              # Start backend dev server on port 3000
+npm run build            # Compile backend TypeScript
 npm run db:migrate       # Run Prisma migrations
 npm run db:generate      # Regenerate Prisma client
 npm run db:seed          # Seed database
 npm run worker:sync-services  # Manual service sync
 npm run worker:sync-orders    # Manual order sync
+npm --prefix frontend run dev -- --port 3001  # Start Next.js frontend
+npm --prefix frontend run build               # Build Next.js frontend
 ```
+
+## Verification / Runtime Rules
+- The repo root is the backend. The Next.js UI lives in `frontend/`; run frontend commands with `npm --prefix frontend ...` or from that directory.
+- Do not claim a frontend fix from `npm run build` alone; that only verifies the backend TypeScript build.
+- For UI work, verify the running browser page at `http://localhost:3001` after starting the frontend with `npm --prefix frontend run dev -- --port 3001`.
+- If `localhost:3001` renders plain unstyled HTML, first inspect the running process and `/_next/static/css/...` responses. A stale/corrupt `.next` cache can make CSS return a 404/500 page; clear `frontend/.next` and restart the frontend before changing Tailwind code.
+- Do not run `npm --prefix frontend run build` while relying on an already-running Next dev server; the build rewrites `.next`. After a frontend build, restart `npm --prefix frontend run dev -- --port 3001` before browser verification.
+- Run backend and frontend builds separately before reporting completion: `npm run build` and `npm --prefix frontend run build`.
+
 
 ## API Routes
 ```

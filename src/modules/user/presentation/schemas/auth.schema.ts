@@ -30,5 +30,22 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
+export const verifyEmailSchema = z.object({
+  email: z
+    .string()
+    .email('Invalid email address')
+    .transform((v) => v.toLowerCase().trim()),
+  otp: z.string().regex(/^\d{6}$/, 'OTP must be a 6-digit code'),
+});
+
+export const resendOtpSchema = z.object({
+  email: z
+    .string()
+    .email('Invalid email address')
+    .transform((v) => v.toLowerCase().trim()),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type VerifyEmailInput = z.infer<typeof verifyEmailSchema>;
+export type ResendOtpInput = z.infer<typeof resendOtpSchema>;

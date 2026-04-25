@@ -175,6 +175,66 @@ export class BalanceService {
       },
     );
   }
+  /**
+   * Admin debit — uses ADMIN_DEBIT transaction type, no orderId.
+   */
+  async adminDebit(
+    userId: string,
+    amount: Prisma.Decimal,
+    description: string,
+  ): Promise<BalanceMutationResult> {
+    return prisma.$transaction(
+      async (tx) => {
+        const [user] = await tx.$queryRaw<[{ id: string; balance: Prisma.Decimal }]>`
+          SELECT id, balance FROM users WHERE id = ${userId}::uuid FOR UPDATE
+        `;
+
+        if (!user) {
+          throw new Error(`User ${userId} not found`);
+        }
+
+        const currentBalance = new Prisma.Decimal(user.balance.toString());
+
+        if (currentBalance.lessThan(amount)) {
+          throw new InsufficientBalanceError(userId, currentBalance, amount);
+        }
+
+        const newBalance = currentBalance.minus(amount);
+
+        await tx.$executeRaw`
+          UPDATE users SET balance = ${newBalance}::decimal, updated_at = NOW()
+          WHERE id = ${userId}::uuid
+        `;
+
+        const transaction = await tx.transaction.create({
+          data: {
+            userId,
+            type: TransactionType.ADMIN_DEBIT,
+            amount: amount.negated(),
+            balanceAfter: newBalance,
+            description,
+          },
+        });
+
+        logger.info('Admin balance deducted', {
+          userId,
+          amount: amount.toString(),
+          newBalance: newBalance.toString(),
+          transactionId: transaction.id,
+        });
+
+        return {
+          previousBalance: currentBalance,
+          newBalance,
+          transactionId: transaction.id,
+        };
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        timeout: 10_000,
+      },
+    );
+  }
 }
 
 export class InsufficientBalanceError extends Error {

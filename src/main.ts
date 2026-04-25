@@ -8,16 +8,32 @@ import { redis } from './shared/infrastructure/redis';
 import { logger } from './shared/infrastructure/logger';
 
 async function bootstrap() {
-  // Connect Redis eagerly so rate limiters work from first request
-  await redis.connect();
+  // Ensure Redis is connected (may already be connected via rate-limiter import)
+  if (redis.status === 'wait') {
+    await redis.connect();
+  }
   logger.info('Redis connected');
 
   const app = express();
 
   // ── Global middleware ──────────────────────────────────
   app.use(helmet());
-  app.use(cors());
-  app.use(express.json({ limit: '1mb' }));
+  app.use(cors({
+    origin: process.env.FRONTEND_ORIGIN || 'http://localhost:3001',
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  }));
+
+  // Trust first proxy for correct req.ip behind reverse proxy/CDN
+  app.set('trust proxy', 1);
+
+  // Capture raw body for webhook HMAC verification
+  app.use(express.json({
+    limit: '1mb',
+    verify: (req: express.Request, _res, buf) => {
+      (req as express.Request & { rawBody?: Buffer }).rawBody = buf;
+    },
+  }));
 
   // ── Health check (no auth, no rate limit) ──────────────
   app.get('/health', (_req, res) => {
@@ -47,6 +63,7 @@ async function bootstrap() {
 }
 
 bootstrap().catch((err) => {
+  console.error('STARTUP ERROR:', err);
   logger.error('Failed to start server', { error: err });
   process.exit(1);
 });
