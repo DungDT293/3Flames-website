@@ -12,7 +12,9 @@ import {
   type AdminPricingService,
 } from "@/lib/api/admin";
 import type { ApiError } from "@/types/api";
-import { formatCurrency } from "@/lib/utils/currency";
+import { formatCurrency, formatDisplayMoney } from "@/lib/utils/currency";
+import { usePreferencesStore } from "@/lib/stores/preferences-store";
+import { useExchangeRateStore } from "@/lib/stores/exchange-rate-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,6 +29,9 @@ function calcSellingPrice(originalPrice: string, margin: string): number {
 }
 
 export default function AdminPricingPage() {
+  const currency = usePreferencesStore((s) => s.currency);
+  const rateObj = useExchangeRateStore((s) => s.rate);
+  const rate = rateObj?.rate ?? "25000";
   const [services, setServices] = useState<AdminPricingService[]>([]);
   const [globalMargin, setGlobalMargin] = useState("10");
   const [globalInput, setGlobalInput] = useState("10");
@@ -162,8 +167,8 @@ export default function AdminPricingPage() {
                 {services.map((svc) => (
                   <TableRow key={svc.id}>
                     <TableCell><div className="max-w-md"><p className="truncate text-sm font-medium text-app-fg">{svc.name}</p><p className="text-xs text-app-muted">{svc.category} • #{svc.providerServiceId}</p></div></TableCell>
-                    <TableCell className="tabular-nums text-app-fg">{formatCurrency(svc.originalPrice)}</TableCell>
-                    <TableCell className="tabular-nums font-semibold text-brand-500">{formatCurrency(svc.sellingPrice)}</TableCell>
+                    <TableCell className="tabular-nums text-app-fg">{formatDisplayMoney(svc.originalPrice, currency, rate)}</TableCell>
+                    <TableCell className="tabular-nums font-semibold text-brand-500">{formatDisplayMoney(svc.sellingPrice, currency, rate)}</TableCell>
                     <TableCell><div className="flex items-center gap-2"><span className="font-medium text-app-fg">{svc.profitMargin}%</span>{svc.isMarginOverride && <Badge variant="warning">Override</Badge>}</div></TableCell>
                     <TableCell className="text-sm text-app-muted">{svc.minQuantity} / {svc.maxQuantity}</TableCell>
                     <TableCell><Badge variant={svc.isActive ? "success" : "secondary"}>{svc.isActive ? "Bật" : "Tắt"}</Badge></TableCell>
@@ -181,13 +186,13 @@ export default function AdminPricingPage() {
       <Dialog open={editDialog.open} onOpenChange={(open) => !open && setEditDialog({ open: false, service: null })}>
         <DialogContent onClose={() => setEditDialog({ open: false, service: null })}>
           <DialogHeader><DialogTitle>Override margin dịch vụ</DialogTitle><DialogDescription>{editDialog.service?.name}</DialogDescription></DialogHeader>
-          <div className="space-y-4"><div className="grid grid-cols-2 gap-3 rounded-lg border border-app-border bg-app-elevated p-3 text-sm"><div><p className="text-app-muted">Giá gốc</p><p className="font-semibold text-app-fg">{formatCurrency(editDialog.service?.originalPrice || "0")}</p></div><div><p className="text-app-muted">Preview giá bán</p><p className="font-semibold text-brand-500">{formatCurrency(calcSellingPrice(editDialog.service?.originalPrice || "0", marginInput).toString())}</p></div></div><div className="space-y-2"><Label htmlFor="service-margin">Margin mới (%)</Label><Input id="service-margin" type="number" min={0} step="0.01" value={marginInput} onChange={(e) => setMarginInput(e.target.value)} /></div></div>
+          <div className="space-y-4"><div className="grid grid-cols-2 gap-3 rounded-lg border border-app-border bg-app-elevated p-3 text-sm"><div><p className="text-app-muted">Giá gốc</p><p className="font-semibold text-app-fg">{formatDisplayMoney(editDialog.service?.originalPrice || "0", currency, rate)}</p></div><div><p className="text-app-muted">Preview giá bán</p><p className="font-semibold text-brand-500">{formatDisplayMoney(calcSellingPrice(editDialog.service?.originalPrice || "0", marginInput).toString(), currency, rate)}</p></div></div><div className="space-y-2"><Label htmlFor="service-margin">Margin mới (%)</Label><Input id="service-margin" type="number" min={0} step="0.01" value={marginInput} onChange={(e) => setMarginInput(e.target.value)} /></div></div>
           <DialogFooter><Button variant="secondary" onClick={() => setEditDialog({ open: false, service: null })}>Hủy</Button><Button onClick={saveServiceMargin}>Lưu override</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={resetDialog.open} onOpenChange={(open) => !open && setResetDialog({ open: false, service: null })}>
-        <DialogContent onClose={() => setResetDialog({ open: false, service: null })}><DialogHeader><DialogTitle>Reset margin dịch vụ</DialogTitle><DialogDescription>Reset {resetDialog.service?.name} về margin chung {globalMargin}%?</DialogDescription></DialogHeader><div className="rounded-lg border border-app-border bg-app-elevated p-3 text-sm"><p className="text-app-muted">Giá bán sau reset</p><p className="font-semibold text-brand-500">{formatCurrency(calcSellingPrice(resetDialog.service?.originalPrice || "0", globalMargin).toString())}</p></div><DialogFooter><Button variant="secondary" onClick={() => setResetDialog({ open: false, service: null })}>Hủy</Button><Button onClick={confirmReset}>Reset về mặc định</Button></DialogFooter></DialogContent>
+        <DialogContent onClose={() => setResetDialog({ open: false, service: null })}><DialogHeader><DialogTitle>Reset margin dịch vụ</DialogTitle><DialogDescription>Reset {resetDialog.service?.name} về margin chung {globalMargin}%?</DialogDescription></DialogHeader><div className="rounded-lg border border-app-border bg-app-elevated p-3 text-sm"><p className="text-app-muted">Giá bán sau reset</p><p className="font-semibold text-brand-500">{formatDisplayMoney(calcSellingPrice(resetDialog.service?.originalPrice || "0", globalMargin).toString(), currency, rate)}</p></div><DialogFooter><Button variant="secondary" onClick={() => setResetDialog({ open: false, service: null })}>Hủy</Button><Button onClick={confirmReset}>Reset về mặc định</Button></DialogFooter></DialogContent>
       </Dialog>
     </div>
   );

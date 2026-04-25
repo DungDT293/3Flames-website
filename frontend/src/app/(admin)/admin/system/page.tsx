@@ -40,7 +40,7 @@ export default function SystemHealthPage() {
       const data = await getCircuitBreaker();
       setStatus(data);
     } catch {
-      setError("Failed to load circuit breaker status.");
+      setError("Không thể tải trạng thái hệ thống.");
     } finally {
       setIsLoading(false);
     }
@@ -59,7 +59,7 @@ export default function SystemHealthPage() {
     } catch (err) {
       const axiosErr = err as AxiosError<ApiError>;
       toast.error(
-        axiosErr.response?.data?.error || "Failed to reset circuit breaker.",
+        axiosErr.response?.data?.error || "Không thể reset hệ thống.",
       );
     } finally {
       setIsResetting(false);

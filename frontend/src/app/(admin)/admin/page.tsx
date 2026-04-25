@@ -13,7 +13,9 @@ import {
   ArrowDownRight,
 } from "lucide-react";
 import { getAnalytics, type AdminAnalytics, type AnalyticsPeriod, type AnalyticsSeriesPoint } from "@/lib/api/admin";
-import { formatCurrency } from "@/lib/utils/currency";
+import { formatCurrency, formatDisplayMoney } from "@/lib/utils/currency";
+import { usePreferencesStore } from "@/lib/stores/preferences-store";
+import { useExchangeRateStore } from "@/lib/stores/exchange-rate-store";
 import {
   Card,
   CardHeader,
@@ -42,7 +44,7 @@ function ChangeBadge({ value }: { value: number }) {
   );
 }
 
-function Bars({ data, metric }: { data: AnalyticsSeriesPoint[]; metric: "revenue" | "profit" | "deposits" }) {
+function Bars({ data, metric, currency, rate }: { data: AnalyticsSeriesPoint[]; metric: "revenue" | "profit" | "deposits"; currency: "USD" | "VND"; rate: string }) {
   const values = data.map((item) => Number(item[metric] || 0));
   const max = Math.max(...values, 1);
   return (
@@ -53,7 +55,7 @@ function Bars({ data, metric }: { data: AnalyticsSeriesPoint[]; metric: "revenue
           <div key={item.bucket} className="group flex flex-1 flex-col items-center justify-end gap-2">
             <div className="relative w-full rounded-t bg-brand-500/80 transition-colors group-hover:bg-brand-400" style={{ height: `${height}%` }}>
               <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded bg-black px-2 py-1 text-xs text-white group-hover:block">
-                {item.bucket}: {formatCurrency(values[idx].toString())}
+                {item.bucket}: {formatDisplayMoney(values[idx].toString(), currency, rate)}
               </div>
             </div>
           </div>
@@ -87,6 +89,9 @@ function Lines({ data }: { data: AnalyticsSeriesPoint[] }) {
 }
 
 export default function AdminOverviewPage() {
+  const currency = usePreferencesStore((s) => s.currency);
+  const rateObj = useExchangeRateStore((s) => s.rate);
+  const rate = rateObj?.rate ?? "25000";
   const [period, setPeriod] = useState<AnalyticsPeriod>("day");
   const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -100,7 +105,7 @@ export default function AdminOverviewPage() {
         const data = await getAnalytics(period);
         setAnalytics(data);
       } catch {
-        setError("Failed to load analytics.");
+        setError("Không thể tải dữ liệu thống kê.");
       } finally {
         setIsLoading(false);
       }
@@ -112,16 +117,16 @@ export default function AdminOverviewPage() {
     return [
       {
         label: "Doanh thu",
-        value: formatCurrency(analytics.summary.revenue.current),
-        previous: formatCurrency(analytics.summary.revenue.previous),
+        value: formatDisplayMoney(analytics.summary.revenue.current, currency, rate),
+        previous: formatDisplayMoney(analytics.summary.revenue.previous, currency, rate),
         change: analytics.summary.revenue.changePercent,
         icon: DollarSign,
         color: "text-brand-500",
       },
       {
         label: "Lợi nhuận",
-        value: formatCurrency(analytics.summary.profit.current),
-        previous: formatCurrency(analytics.summary.profit.previous),
+        value: formatDisplayMoney(analytics.summary.profit.current, currency, rate),
+        previous: formatDisplayMoney(analytics.summary.profit.previous, currency, rate),
         change: analytics.summary.profit.changePercent,
         icon: TrendingUp,
         color: "text-red-400",
@@ -144,14 +149,14 @@ export default function AdminOverviewPage() {
       },
       {
         label: "Nạp tiền",
-        value: formatCurrency(analytics.summary.deposits.current),
-        previous: formatCurrency(analytics.summary.deposits.previous),
+        value: formatDisplayMoney(analytics.summary.deposits.current, currency, rate),
+        previous: formatDisplayMoney(analytics.summary.deposits.previous, currency, rate),
         change: analytics.summary.deposits.changePercent,
         icon: Wallet,
         color: "text-emerald-400",
       },
     ];
-  }, [analytics]);
+  }, [analytics, currency, rate]);
 
   if (isLoading) {
     return (
@@ -208,7 +213,7 @@ export default function AdminOverviewPage() {
       <div className="grid gap-4 xl:grid-cols-2">
         <div>
           <h2 className="mb-3 text-sm font-semibold text-app-fg">Doanh thu theo kỳ</h2>
-          <Bars data={analytics.series} metric="revenue" />
+          <Bars data={analytics.series} metric="revenue" currency={currency} rate={rate} />
         </div>
         <div>
           <h2 className="mb-3 text-sm font-semibold text-app-fg">Đơn hàng và user mới</h2>
@@ -232,11 +237,11 @@ export default function AdminOverviewPage() {
             {analytics.series.map((row) => (
               <tr key={row.bucket} className="border-b border-app-border last:border-0">
                 <td className="px-4 py-3 text-app-fg">{row.bucket}</td>
-                <td className="px-4 py-3 text-right text-app-fg">{formatCurrency(row.revenue)}</td>
-                <td className="px-4 py-3 text-right text-app-fg">{formatCurrency(row.profit)}</td>
+                <td className="px-4 py-3 text-right text-app-fg">{formatDisplayMoney(row.revenue, currency, rate)}</td>
+                <td className="px-4 py-3 text-right text-app-fg">{formatDisplayMoney(row.profit, currency, rate)}</td>
                 <td className="px-4 py-3 text-right text-app-fg">{formatNumber(row.orders)}</td>
                 <td className="px-4 py-3 text-right text-app-fg">{formatNumber(row.users)}</td>
-                <td className="px-4 py-3 text-right text-app-fg">{formatCurrency(row.deposits)}</td>
+                <td className="px-4 py-3 text-right text-app-fg">{formatDisplayMoney(row.deposits, currency, rate)}</td>
               </tr>
             ))}
           </tbody>

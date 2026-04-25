@@ -6,7 +6,9 @@ import { useParams } from "next/navigation";
 import { AxiosError } from "axios";
 import { ArrowLeft, Clock3, ExternalLink, Loader2, ReceiptText, ShieldCheck, UserRound, WalletCards } from "lucide-react";
 import { getUserDetail, type AdminUserDetail } from "@/lib/api/admin";
-import { formatCurrency, formatVnd } from "@/lib/utils/currency";
+import { formatCurrency, formatDisplayMoney, formatVnd } from "@/lib/utils/currency";
+import { usePreferencesStore } from "@/lib/stores/preferences-store";
+import { useExchangeRateStore } from "@/lib/stores/exchange-rate-store";
 import { localizeServiceText } from "@/lib/utils/service-copy";
 import type { ApiError } from "@/types/api";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +43,9 @@ function statusVariant(status: string): "success" | "warning" | "destructive" | 
 
 export default function AdminUserDetailPage() {
   const params = useParams<{ id: string }>();
+  const currency = usePreferencesStore((s) => s.currency);
+  const rateObj = useExchangeRateStore((s) => s.rate);
+  const rate = rateObj?.rate ?? "25000";
   const [data, setData] = useState<AdminUserDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -100,10 +105,10 @@ export default function AdminUserDetailPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
-        <Card><CardHeader className="pb-2"><CardDescription>Số dư hiện tại</CardDescription></CardHeader><CardContent><p className="text-2xl font-bold text-brand-500">{formatCurrency(data.user.balance)}</p></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Số dư hiện tại</CardDescription></CardHeader><CardContent><p className="text-2xl font-bold text-brand-500">{formatDisplayMoney(data.user.balance, currency, rate)}</p></CardContent></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Tổng đơn hàng</CardDescription></CardHeader><CardContent><p className="text-2xl font-bold text-app-fg">{data.user.totalOrders}</p></CardContent></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Đã nạp confirmed</CardDescription></CardHeader><CardContent><p className="text-2xl font-bold text-emerald-400">{formatVnd(totals.depositVnd)}</p></CardContent></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>Chi tiêu đơn gần đây</CardDescription></CardHeader><CardContent><p className="text-2xl font-bold text-app-fg">{formatCurrency(totals.orderSpend.toString())}</p></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Chi tiêu đơn gần đây</CardDescription></CardHeader><CardContent><p className="text-2xl font-bold text-app-fg">{formatDisplayMoney(totals.orderSpend.toString(), currency, rate)}</p></CardContent></Card>
       </div>
 
       <Card>
@@ -134,7 +139,7 @@ export default function AdminUserDetailPage() {
                       <TableCell><p className="font-medium text-app-fg">{localizeServiceText(order.service.name, "vi")}</p><p className="text-xs text-app-muted">{localizeServiceText(order.service.category, "vi")}</p></TableCell>
                       <TableCell className="max-w-80"><a href={order.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 break-all text-sm text-brand-500 hover:text-brand-400">{order.link}<ExternalLink className="h-3 w-3 shrink-0" /></a></TableCell>
                       <TableCell>{order.quantity.toLocaleString("vi-VN")}</TableCell>
-                      <TableCell className="font-semibold text-app-fg">{formatCurrency(order.charge)}</TableCell>
+                      <TableCell className="font-semibold text-app-fg">{formatDisplayMoney(order.charge, currency, rate)}</TableCell>
                       <TableCell><Badge variant={statusVariant(order.status)}>{order.status}</Badge></TableCell>
                       <TableCell className="text-sm text-app-muted">{formatDate(order.createdAt)}</TableCell>
                     </TableRow>

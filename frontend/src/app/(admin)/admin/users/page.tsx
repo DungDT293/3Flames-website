@@ -16,7 +16,9 @@ import {
 } from "@/lib/api/admin";
 import type { ApiError, UserRole } from "@/types/api";
 import { useAuthStore } from "@/lib/stores/auth-store";
-import { formatCurrency } from "@/lib/utils/currency";
+import { usePreferencesStore } from "@/lib/stores/preferences-store";
+import { useExchangeRateStore } from "@/lib/stores/exchange-rate-store";
+import { formatDisplayMoney } from "@/lib/utils/currency";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -79,6 +81,9 @@ function formatDate(value: string): string {
 
 export default function UserManagementPage() {
   const currentUser = useAuthStore((s) => s.user);
+  const currency = usePreferencesStore((s) => s.currency);
+  const rateObj = useExchangeRateStore((s) => s.rate);
+  const rate = rateObj?.rate ?? "25000";
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
   const [searchQuery, setSearchQuery] = useState("");
@@ -156,7 +161,7 @@ export default function UserManagementPage() {
     if (!balanceDialog.user) return;
     const amt = parseFloat(balanceForm.amount);
     if (!amt || amt <= 0) return toast.error("Nhập số tiền hợp lệ.");
-    if (!balanceForm.description.trim()) return toast.error("Description is required.");
+    if (!balanceForm.description.trim()) return toast.error("Vui lòng nhập mô tả điều chỉnh.");
     if (balanceForm.type === "DEDUCT" && amt > Number(balanceDialog.user.balance)) return toast.error("Không thể trừ quá số dư hiện tại.");
     setIsAdjusting(true);
     try {
@@ -186,7 +191,7 @@ export default function UserManagementPage() {
 
   async function handleSuspend() {
     if (!suspendDialog.user) return;
-    if (!suspendReason.trim()) return toast.error("Reason is required.");
+    if (!suspendReason.trim()) return toast.error("Vui lòng nhập lý do khóa tài khoản.");
     setIsSuspending(true);
     try {
       const res = await suspendUser(suspendDialog.user.id, suspendReason.trim());
@@ -259,7 +264,7 @@ export default function UserManagementPage() {
         <Card><CardHeader><CardTitle className="text-sm text-app-muted">Tổng khớp lọc</CardTitle></CardHeader><CardContent><p className="text-2xl font-bold text-app-fg">{pagination.total}</p></CardContent></Card>
         <Card><CardHeader><CardTitle className="text-sm text-app-muted">Active trên trang</CardTitle></CardHeader><CardContent><p className="text-2xl font-bold text-green-400">{summary.active}</p></CardContent></Card>
         <Card><CardHeader><CardTitle className="text-sm text-app-muted">Bị khóa trên trang</CardTitle></CardHeader><CardContent><p className="text-2xl font-bold text-red-400">{summary.suspended}</p></CardContent></Card>
-        <Card><CardHeader><CardTitle className="text-sm text-app-muted">Số dư trang này</CardTitle></CardHeader><CardContent><p className="text-2xl font-bold text-brand-500">{formatCurrency(summary.pageBalance.toString())}</p></CardContent></Card>
+        <Card><CardHeader><CardTitle className="text-sm text-app-muted">Số dư trang này</CardTitle></CardHeader><CardContent><p className="text-2xl font-bold text-brand-500">{formatDisplayMoney(summary.pageBalance.toString(), currency, rate)}</p></CardContent></Card>
       </div>
 
       <div className="grid gap-3 lg:grid-cols-[1fr_180px_180px_120px]">
@@ -294,7 +299,7 @@ export default function UserManagementPage() {
                     <TableRow key={u.id}>
                       <TableCell><div><p className="text-sm font-medium text-app-fg">{u.username}</p><p className="text-xs text-app-muted">{u.email}</p><p className="mt-1 text-xs text-app-muted">Tạo: {formatDate(u.createdAt)}</p></div></TableCell>
                       <TableCell><p className="text-sm text-app-fg">{u.totalOrders} đơn</p><p className="text-xs text-app-muted">{u.totalTransactions} giao dịch</p></TableCell>
-                      <TableCell className="text-right tabular-nums font-medium text-app-fg">{formatCurrency(u.balance)}</TableCell>
+                      <TableCell className="text-right tabular-nums font-medium text-app-fg">{formatDisplayMoney(u.balance, currency, rate)}</TableCell>
                       <TableCell><Badge variant={getStatusVariant(u.status)}>{statusLabel(u.status)}</Badge></TableCell>
                       <TableCell><Badge variant={getRoleBadge(u.role)}>{roleLabel(u.role)}</Badge></TableCell>
                       <TableCell className="text-right">
@@ -330,8 +335,8 @@ export default function UserManagementPage() {
 
       <Dialog open={balanceDialog.open} onOpenChange={(open) => !open && setBalanceDialog({ open: false, user: null })}>
         <DialogContent onClose={() => setBalanceDialog({ open: false, user: null })}>
-          <DialogHeader><DialogTitle>Điều chỉnh số dư</DialogTitle><DialogDescription>Điều chỉnh số dư cho @{balanceDialog.user?.username}. Số dư hiện tại: <span className="text-brand-500 font-semibold">{formatCurrency(balanceDialog.user?.balance || "0")}</span></DialogDescription></DialogHeader>
-          <div className="space-y-4"><div className="space-y-2"><Label>Loại</Label><Select value={balanceForm.type} onChange={(e) => setBalanceForm((f) => ({ ...f, type: e.target.value as "ADD" | "DEDUCT" }))}><option value="ADD">Cộng tiền</option><option value="DEDUCT">Trừ tiền</option></Select></div><div className="space-y-2"><Label htmlFor="bal-amount">Số tiền</Label><Input id="bal-amount" type="number" placeholder="Nhập số tiền" value={balanceForm.amount} onChange={(e) => setBalanceForm((f) => ({ ...f, amount: e.target.value }))} min={0} step="0.01" /></div><div className="rounded-lg border border-app-border bg-app-elevated p-3 text-sm"><p className="text-app-muted">Số dư sau điều chỉnh</p><p className={`mt-1 text-lg font-bold ${estimatedBalance < 0 ? "text-red-400" : "text-app-fg"}`}>{formatCurrency(estimatedBalance.toString())}</p></div><div className="space-y-2"><Label htmlFor="bal-description">Adjustment description</Label><Input id="bal-description" placeholder="Mô tả lý do điều chỉnh" value={balanceForm.description} onChange={(e) => setBalanceForm((f) => ({ ...f, description: e.target.value }))} maxLength={500} /></div></div>
+          <DialogHeader><DialogTitle>Điều chỉnh số dư</DialogTitle><DialogDescription>Điều chỉnh số dư cho @{balanceDialog.user?.username}. Số dư hiện tại: <span className="text-brand-500 font-semibold">{formatDisplayMoney(balanceDialog.user?.balance || "0", currency, rate)}</span></DialogDescription></DialogHeader>
+          <div className="space-y-4"><div className="space-y-2"><Label>Loại</Label><Select value={balanceForm.type} onChange={(e) => setBalanceForm((f) => ({ ...f, type: e.target.value as "ADD" | "DEDUCT" }))}><option value="ADD">Cộng tiền</option><option value="DEDUCT">Trừ tiền</option></Select></div><div className="space-y-2"><Label htmlFor="bal-amount">Số tiền (USD)</Label><Input id="bal-amount" type="number" placeholder="Nhập số tiền" value={balanceForm.amount} onChange={(e) => setBalanceForm((f) => ({ ...f, amount: e.target.value }))} min={0} step="0.01" /></div><div className="rounded-lg border border-app-border bg-app-elevated p-3 text-sm"><p className="text-app-muted">Số dư sau điều chỉnh</p><p className={`mt-1 text-lg font-bold ${estimatedBalance < 0 ? "text-red-400" : "text-app-fg"}`}>{formatDisplayMoney(estimatedBalance.toString(), currency, rate)}</p></div><div className="space-y-2"><Label htmlFor="bal-description">Mô tả điều chỉnh</Label><Input id="bal-description" placeholder="Mô tả lý do điều chỉnh" value={balanceForm.description} onChange={(e) => setBalanceForm((f) => ({ ...f, description: e.target.value }))} maxLength={500} /></div></div>
           <DialogFooter><Button variant="secondary" onClick={() => setBalanceDialog({ open: false, user: null })} disabled={isAdjusting}>Hủy</Button><Button variant={balanceForm.type === "DEDUCT" ? "destructive" : "default"} onClick={handleAdjustBalance} isLoading={isAdjusting}>{balanceForm.type === "ADD" ? "Xác nhận cộng tiền" : "Xác nhận trừ tiền"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
