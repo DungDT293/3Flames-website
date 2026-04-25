@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { validate } from '../../../shared/infrastructure/middleware/validate.middleware';
 import { authLimiter } from '../../../shared/infrastructure/middleware/rate-limit.middleware';
-import { registerSchema, loginSchema, verifyEmailSchema, resendOtpSchema } from './schemas/auth.schema';
+import { registerSchema, loginSchema, verifyEmailSchema, resendOtpSchema, lookupAccountSchema, forgotPasswordSchema, resetPasswordSchema } from './schemas/auth.schema';
 import {
   AuthService,
   DuplicateFieldError,
@@ -10,6 +10,7 @@ import {
   EmailNotVerifiedError,
   InvalidOtpError,
 } from '../application/auth.service';
+import { OtpEmailDeliveryError } from '../../../shared/infrastructure/email.service';
 
 const authService = new AuthService();
 
@@ -22,18 +23,91 @@ authRouter.post(
   validate(registerSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { email, username, password } = req.body;
-      const result = await authService.register(email, username, password);
+      const { email, username, password, phone } = req.body;
+      const result = await authService.register(email, username, password, phone);
 
       res.status(201).json({
         message: 'Vui lòng kiểm tra email để lấy mã xác thực',
         success: result.success,
         requiresOtp: result.requiresOtp,
         email: result.email,
+        ...(process.env.NODE_ENV !== 'production' && result.devOtp ? { devOtp: result.devOtp } : {}),
       });
     } catch (error) {
       if (error instanceof DuplicateFieldError) {
         res.status(409).json({ error: error.message, field: error.field });
+        return;
+      }
+      if (error instanceof OtpEmailDeliveryError) {
+        res.status(502).json({ error: error.message, field: 'email' });
+        return;
+      }
+      next(error);
+    }
+  },
+);
+
+// POST /api/v1/auth/lookup-account
+authRouter.post(
+  '/lookup-account',
+  authLimiter,
+  validate(lookupAccountSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { identifier } = req.body as { identifier: string };
+      const account = await authService.lookupAccount(identifier);
+      res.json({ account });
+    } catch (error) {
+      if (error instanceof InvalidCredentialsError) {
+        res.status(404).json({ error: 'Account not found' });
+        return;
+      }
+      next(error);
+    }
+  },
+);
+
+// POST /api/v1/auth/forgot-password
+authRouter.post(
+  '/forgot-password',
+  authLimiter,
+  validate(forgotPasswordSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email } = req.body as { email: string };
+      const result = await authService.forgotPassword(email);
+      res.json({ message: 'Mã đặt lại mật khẩu đã được gửi', success: result.success, email: result.email, ...(process.env.NODE_ENV !== 'production' && result.devOtp ? { devOtp: result.devOtp } : {}) });
+    } catch (error) {
+      if (error instanceof InvalidCredentialsError) {
+        res.status(404).json({ error: 'Email not found' });
+        return;
+      }
+      if (error instanceof OtpEmailDeliveryError) {
+        res.status(502).json({ error: error.message, field: 'email' });
+        return;
+      }
+      next(error);
+    }
+  },
+);
+
+// POST /api/v1/auth/reset-password
+authRouter.post(
+  '/reset-password',
+  authLimiter,
+  validate(resetPasswordSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email, otp, password } = req.body as { email: string; otp: string; password: string };
+      const result = await authService.resetPassword(email, otp, password);
+      res.json({ message: 'Đổi mật khẩu thành công', success: result.success, email: result.email });
+    } catch (error) {
+      if (error instanceof InvalidCredentialsError) {
+        res.status(404).json({ error: 'Email not found' });
+        return;
+      }
+      if (error instanceof InvalidOtpError) {
+        res.status(400).json({ error: error.message });
         return;
       }
       next(error);
@@ -118,10 +192,15 @@ authRouter.post(
         success: result.success,
         requiresOtp: result.requiresOtp,
         email: result.email,
+        ...(process.env.NODE_ENV !== 'production' && result.devOtp ? { devOtp: result.devOtp } : {}),
       });
     } catch (error) {
       if (error instanceof InvalidCredentialsError) {
         res.status(404).json({ error: 'Email not found' });
+        return;
+      }
+      if (error instanceof OtpEmailDeliveryError) {
+        res.status(502).json({ error: error.message, field: 'email' });
         return;
       }
       next(error);

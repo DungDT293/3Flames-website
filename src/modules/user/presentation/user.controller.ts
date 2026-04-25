@@ -16,6 +16,7 @@ userRouter.get('/me', async (req: Request, res: Response) => {
       id: true,
       email: true,
       username: true,
+      phone: true,
       balance: true,
       role: true,
       status: true,
@@ -44,26 +45,37 @@ userRouter.patch(
   validate(updateProfileSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { email, username } = req.body as { email: string; username: string };
+      const { email, username, phone } = req.body as { email: string; username: string; phone?: string };
 
       const existing = await prisma.user.findFirst({
         where: {
           id: { not: req.user!.id },
-          OR: [{ email }, { username }],
+          OR: [
+            { email },
+            { username: { equals: username, mode: 'insensitive' } },
+            ...(phone ? [{ phone }] : []),
+          ],
         },
-        select: { email: true, username: true },
+        select: { email: true, username: true, phone: true },
       });
 
       if (existing) {
-        const field = existing.email === email ? 'email' : 'username';
+        const field = existing.email === email ? 'email' : existing.phone === phone ? 'phone' : 'username';
         res.status(409).json({ error: `A user with this ${field} already exists`, field });
         return;
       }
 
+      const currentUser = await prisma.user.findUnique({
+        where: { id: req.user!.id },
+        select: { email: true },
+      });
+
+      const emailChanged = currentUser && currentUser.email !== email;
+
       const user = await prisma.user.update({
         where: { id: req.user!.id },
-        data: { email, username },
-        select: { id: true, email: true, username: true, role: true, status: true, balance: true },
+        data: { email, username, phone, ...(emailChanged ? { isEmailVerified: false } : {}) },
+        select: { id: true, email: true, username: true, phone: true, role: true, status: true, balance: true },
       });
 
       res.json({

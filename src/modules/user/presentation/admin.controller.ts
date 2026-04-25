@@ -1,16 +1,20 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { Prisma, TransactionType, OrderStatus, UserStatus, UserRole } from '@prisma/client';
+import { DepositStatus, Prisma, TransactionType, OrderStatus, UserStatus, UserRole } from '@prisma/client';
 import { prisma } from '../../../shared/infrastructure/database';
 import { requireRole } from '../../../shared/infrastructure/middleware/auth.middleware';
 import { validate } from '../../../shared/infrastructure/middleware/validate.middleware';
 import { BalanceService } from '../../transaction/application/balance.service';
 import { CircuitBreaker } from '../../../shared/infrastructure/circuit-breaker';
+import { publishUserEvent } from '../../../shared/infrastructure/event-bus';
 import { config } from '../../../config';
 import {
   listUsersSchema,
   adjustBalanceSchema,
   suspendUserSchema,
   updateUserRoleSchema,
+  listDepositRequestsSchema,
+  confirmDepositSchema,
+  rejectDepositSchema,
   listAuditLogsSchema,
   adminAnalyticsSchema,
   listPricingServicesSchema,
@@ -208,7 +212,231 @@ adminRouter.get(
 );
 
 adminRouter.get(
+  '/deposits',
+  requireRole(UserRole.ADMIN),
+  validate(listDepositRequestsSchema, 'query'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const page = Math.max(1, Number(req.query.page) || 1);
+      const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+      const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+      const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+      const offset = (page - 1) * limit;
+
+      const where: Prisma.DepositRequestWhereInput = {
+        ...(status && { status: status as DepositStatus }),
+        ...(search && {
+          OR: [
+            { memo: { contains: search, mode: 'insensitive' as const } },
+            { user: { email: { contains: search, mode: 'insensitive' as const } } },
+            { user: { username: { contains: search, mode: 'insensitive' as const } } },
+          ],
+        }),
+      };
+
+      const [deposits, total] = await Promise.all([
+        prisma.depositRequest.findMany({
+          where,
+          select: {
+            id: true,
+            userId: true,
+            memo: true,
+            amountVnd: true,
+            status: true,
+            providerPaymentId: true,
+            transactionId: true,
+            expiresAt: true,
+            createdAt: true,
+            updatedAt: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                username: true,
+                balance: true,
+                status: true,
+                role: true,
+              },
+            },
+          },
+          orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+          skip: offset,
+          take: limit,
+        }),
+        prisma.depositRequest.count({ where }),
+      ]);
+
+      res.json({
+        data: deposits.map((deposit) => ({
+          ...deposit,
+          user: { ...deposit.user, balance: deposit.user.balance.toString() },
+        })),
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+adminRouter.post(
+  '/deposits/:id/confirm',
+  requireRole(UserRole.ADMIN),
+  validate(confirmDepositSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    const depositId = String(req.params.id);
+    const { providerPaymentId, note } = req.body as { providerPaymentId?: string; note?: string };
+
+    try {
+      const claimed = await prisma.depositRequest.updateMany({
+        where: { id: depositId, status: DepositStatus.PENDING, transactionId: null },
+        data: {
+          status: DepositStatus.CONFIRMED,
+          ...(providerPaymentId ? { providerPaymentId } : {}),
+        },
+      });
+
+      if (claimed.count === 0) {
+        res.status(409).json({ error: 'Deposit has already been processed or does not exist' });
+        return;
+      }
+
+      const deposit = await prisma.depositRequest.findUnique({
+        where: { id: depositId },
+        select: {
+          id: true,
+          userId: true,
+          memo: true,
+          amountVnd: true,
+          status: true,
+          providerPaymentId: true,
+          user: { select: { id: true, username: true, email: true, balance: true } },
+        },
+      });
+
+      if (!deposit) {
+        res.status(404).json({ error: 'Deposit not found' });
+        return;
+      }
+
+      try {
+        const amount = new Prisma.Decimal(deposit.amountVnd);
+        const result = await balanceService.credit(
+          deposit.userId,
+          amount,
+          TransactionType.DEPOSIT,
+          `Manual deposit confirmation by Admin @${req.user!.username} — Memo: ${deposit.memo}${note ? ` — ${note}` : ''}`,
+        );
+
+        await prisma.depositRequest.update({
+          where: { id: deposit.id },
+          data: { transactionId: result.transactionId },
+        });
+
+        await createAuditLog({
+          actorId: req.user!.id,
+          targetId: deposit.userId,
+          action: 'CONFIRM_DEPOSIT',
+          entity: 'DepositRequest',
+          oldData: { status: DepositStatus.PENDING, memo: deposit.memo, amountVnd: deposit.amountVnd },
+          newData: {
+            status: DepositStatus.CONFIRMED,
+            memo: deposit.memo,
+            amountVnd: deposit.amountVnd,
+            providerPaymentId: deposit.providerPaymentId,
+            transactionId: result.transactionId,
+            note,
+          },
+          ipAddress: getRequestIp(req),
+        });
+
+        await publishUserEvent(deposit.userId, {
+          type: 'DEPOSIT_SUCCESS',
+          amount: amount.toString(),
+          newBalance: result.newBalance.toString(),
+          transactionId: result.transactionId,
+          timestamp: new Date().toISOString(),
+        });
+
+        res.json({
+          message: 'Deposit confirmed successfully',
+          depositId: deposit.id,
+          userId: deposit.userId,
+          amount: amount.toString(),
+          previousBalance: result.previousBalance.toString(),
+          newBalance: result.newBalance.toString(),
+          transactionId: result.transactionId,
+        });
+      } catch (error) {
+        await prisma.depositRequest.updateMany({
+          where: { id: depositId, status: DepositStatus.CONFIRMED, transactionId: null },
+          data: { status: DepositStatus.PENDING, providerPaymentId: null },
+        });
+        throw error;
+      }
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+adminRouter.post(
+  '/deposits/:id/reject',
+  requireRole(UserRole.ADMIN),
+  validate(rejectDepositSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const depositId = String(req.params.id);
+      const { reason } = req.body as { reason: string };
+
+      const deposit = await prisma.depositRequest.findUnique({
+        where: { id: depositId },
+        select: { id: true, userId: true, memo: true, amountVnd: true, status: true },
+      });
+
+      if (!deposit) {
+        res.status(404).json({ error: 'Deposit not found' });
+        return;
+      }
+
+      if (deposit.status !== DepositStatus.PENDING) {
+        res.status(409).json({ error: 'Deposit has already been processed' });
+        return;
+      }
+
+      await prisma.$transaction([
+        prisma.depositRequest.update({
+          where: { id: depositId },
+          data: { status: DepositStatus.FAILED },
+        }),
+        prisma.auditLog.create({
+          data: {
+            actorId: req.user!.id,
+            targetId: deposit.userId,
+            action: 'REJECT_DEPOSIT',
+            entity: 'DepositRequest',
+            oldData: { status: deposit.status, memo: deposit.memo, amountVnd: deposit.amountVnd },
+            newData: { status: DepositStatus.FAILED, reason },
+            ipAddress: getRequestIp(req),
+          },
+        }),
+      ]);
+
+      res.json({ message: 'Deposit rejected successfully', depositId, status: DepositStatus.FAILED });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+adminRouter.get(
   '/users',
+  requireRole(UserRole.SUPPORT),
   validate(listUsersSchema, 'query'),
   async (req: Request, res: Response) => {
     const page = Math.max(1, Number(req.query.page) || 1);
@@ -237,6 +465,7 @@ adminRouter.get(
           id: true,
           email: true,
           username: true,
+          phone: true,
           balance: true,
           role: true,
           status: true,
@@ -267,6 +496,126 @@ adminRouter.get(
         totalPages: Math.ceil(total / limit),
       },
     });
+  },
+);
+
+adminRouter.get(
+  '/users/:id',
+  requireRole(UserRole.SUPPORT),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const targetUserId = String(req.params.id);
+      const user = await prisma.user.findUnique({
+        where: { id: targetUserId },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          phone: true,
+          balance: true,
+          role: true,
+          status: true,
+          acceptedTosVersion: true,
+          isEmailVerified: true,
+          createdAt: true,
+          updatedAt: true,
+          _count: { select: { orders: true, transactions: true, depositRequests: true } },
+        },
+      });
+
+      if (!user) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+
+      const [orders, deposits, transactions, activity] = await Promise.all([
+        prisma.order.findMany({
+          where: { userId: targetUserId },
+          select: {
+            id: true,
+            link: true,
+            quantity: true,
+            charge: true,
+            cost: true,
+            status: true,
+            startCount: true,
+            remains: true,
+            apiOrderId: true,
+            createdAt: true,
+            updatedAt: true,
+            service: { select: { id: true, name: true, category: true, type: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        }),
+        prisma.depositRequest.findMany({
+          where: { userId: targetUserId },
+          select: {
+            id: true,
+            memo: true,
+            amountVnd: true,
+            status: true,
+            providerPaymentId: true,
+            transactionId: true,
+            expiresAt: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        }),
+        prisma.transaction.findMany({
+          where: { userId: targetUserId },
+          select: { id: true, type: true, amount: true, balanceAfter: true, orderId: true, description: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        }),
+        prisma.auditLog.findMany({
+          where: { OR: [{ actorId: targetUserId }, { targetId: targetUserId }] },
+          select: {
+            id: true,
+            actorId: true,
+            targetId: true,
+            action: true,
+            entity: true,
+            oldData: true,
+            newData: true,
+            ipAddress: true,
+            createdAt: true,
+            actor: { select: { id: true, username: true, email: true, role: true } },
+            target: { select: { id: true, username: true, email: true, role: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        }),
+      ]);
+
+      const { _count, ...profile } = user;
+
+      res.json({
+        user: {
+          ...profile,
+          balance: user.balance.toString(),
+          totalOrders: _count.orders,
+          totalTransactions: _count.transactions,
+          totalDeposits: _count.depositRequests,
+        },
+        orders: orders.map((order) => ({
+          ...order,
+          charge: order.charge.toString(),
+          cost: order.cost.toString(),
+        })),
+        deposits,
+        transactions: transactions.map((transaction) => ({
+          ...transaction,
+          amount: transaction.amount.toString(),
+          balanceAfter: transaction.balanceAfter.toString(),
+        })),
+        activity,
+      });
+    } catch (error) {
+      next(error);
+    }
   },
 );
 
@@ -734,6 +1083,86 @@ adminRouter.post(
           profitMargin: updated.profitMargin.toString(),
         },
       });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+adminRouter.delete(
+  '/users/:id',
+  requireRole(UserRole.SUPER_ADMIN),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const targetUserId = String(req.params.id);
+
+      if (targetUserId === req.user!.id) {
+        res.status(403).json({ error: 'You cannot delete your own account' });
+        return;
+      }
+
+      const targetUser = await prisma.user.findUnique({
+        where: { id: targetUserId },
+        select: { id: true, email: true, username: true, role: true, status: true },
+      });
+
+      if (!targetUser) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+
+      if (targetUser.role === UserRole.SUPER_ADMIN) {
+        res.status(403).json({ error: 'Super admin accounts cannot be deleted' });
+        return;
+      }
+
+      const suffix = targetUserId.replace(/-/g, '').slice(0, 18);
+      const deletedEmail = `deleted-${suffix}@deleted.3flames.local`;
+      const deletedUsername = `deleted_${suffix}`;
+
+      const [updated] = await prisma.$transaction([
+        prisma.user.update({
+          where: { id: targetUserId },
+          data: {
+            email: deletedEmail,
+            username: deletedUsername,
+            status: UserStatus.BANNED,
+            isEmailVerified: false,
+            otpCode: null,
+            otpExpiresAt: null,
+          },
+          select: { id: true, username: true, email: true, status: true },
+        }),
+        prisma.auditLog.create({
+          data: {
+            actorId: req.user!.id,
+            targetId: targetUserId,
+            action: 'DELETE_USER',
+            entity: 'User',
+            oldData: {
+              email: targetUser.email,
+              username: targetUser.username,
+              role: targetUser.role,
+              status: targetUser.status,
+            },
+            newData: {
+              email: deletedEmail,
+              username: deletedUsername,
+              status: UserStatus.BANNED,
+              anonymized: true,
+            },
+            ipAddress: getRequestIp(req),
+          },
+        }),
+      ]);
+
+      logger.warn('User soft-deleted by super admin', {
+        adminId: req.user!.id,
+        targetUserId,
+        previousUsername: targetUser.username,
+      });
+
+      res.json({ message: 'User deleted successfully', user: updated });
     } catch (error) {
       next(error);
     }

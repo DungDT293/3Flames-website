@@ -12,7 +12,7 @@ import { PreferencesControls } from "@/components/preferences/preferences-contro
 import {
   Flame,
   ShoppingCart,
-  History,
+  ListChecks,
   Layers,
   Wallet,
   Settings,
@@ -26,8 +26,8 @@ import {
 
 const NAV_ITEMS = [
   { href: "/dashboard", labelKey: "dashboard.newOrder", icon: ShoppingCart },
-  { href: "/dashboard/orders", labelKey: "dashboard.orderHistory", icon: History },
   { href: "/dashboard/services", labelKey: "dashboard.services", icon: Layers },
+  { href: "/dashboard/orders", labelKey: "dashboard.orderStatus", icon: ListChecks },
   { href: "/dashboard/add-funds", labelKey: "dashboard.addFunds", icon: Wallet },
   { href: "/dashboard/account", labelKey: "dashboard.account", icon: Settings },
 ] as const;

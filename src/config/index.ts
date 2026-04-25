@@ -76,7 +76,8 @@ export const config = {
   },
 
   vietqr: {
-    bankBin: process.env.VIETQR_BANK_BIN || '',
-    accountNumber: process.env.VIETQR_ACCOUNT_NUMBER || '',
+    bankBin: process.env.VIETQR_BANK_BIN || '970407',
+    accountNumber: process.env.VIETQR_ACCOUNT_NUMBER || '8129032003',
+    accountName: process.env.VIETQR_ACCOUNT_NAME || 'DONG TIEN DUNG',
   },
 } as const;

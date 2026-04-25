@@ -1,24 +1,34 @@
 import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 import jwt, { type SignOptions } from 'jsonwebtoken';
 import { prisma } from '../../../shared/infrastructure/database';
 import { config } from '../../../config';
-import { sendOtpEmail } from '../../../shared/infrastructure/email.service';
+import { OtpEmailDeliveryError, sendOtpEmail } from '../../../shared/infrastructure/email.service';
+import { logger } from '../../../shared/infrastructure/logger';
 
 const SALT_ROUNDS = 12;
 const OTP_TTL_MS = 10 * 60 * 1000;
 
 function generateOtp(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return crypto.randomInt(100000, 1000000).toString();
 }
 
 export class AuthService {
-  async register(email: string, username: string, password: string) {
+  async register(email: string, username: string, password: string, phone?: string) {
+    const normalizedUsername = username.trim().toLowerCase();
     const existing = await prisma.user.findFirst({
-      where: { OR: [{ email }, { username }] },
+      where: {
+        OR: [
+          { email },
+          { username: { equals: normalizedUsername, mode: 'insensitive' } },
+          ...(phone ? [{ phone }] : []),
+        ],
+      },
+      select: { email: true, username: true, phone: true },
     });
 
     if (existing) {
-      const field = existing.email === email ? 'email' : 'username';
+      const field = existing.email === email ? 'email' : existing.phone === phone ? 'phone' : 'username';
       throw new DuplicateFieldError(field);
     }
 
@@ -29,24 +39,36 @@ export class AuthService {
     const user = await prisma.user.create({
       data: {
         email,
-        username,
+        username: normalizedUsername,
+        phone,
         passwordHash,
         acceptedTosVersion: config.tos.currentVersion,
         isEmailVerified: false,
         otpCode,
         otpExpiresAt,
       },
-      select: { id: true, email: true, username: true, createdAt: true },
+      select: { id: true, email: true, username: true, phone: true, createdAt: true },
     });
+
+    let devOtp: string | undefined;
 
     try {
       await sendOtpEmail(user.email, otpCode);
     } catch (error) {
-      await prisma.user.delete({ where: { id: user.id } });
-      throw error;
+      if (config.env !== 'development') {
+        await prisma.user.delete({ where: { id: user.id } });
+        throw error;
+      }
+
+      devOtp = otpCode;
+      logger.warn('Development OTP email fallback active', {
+        email: user.email,
+        otp: otpCode,
+        reason: error instanceof Error ? error.message : 'Unknown email delivery error',
+      });
     }
 
-    return { success: true, requiresOtp: true, email: user.email };
+    return { success: true, requiresOtp: true, email: user.email, devOtp };
   }
 
   async verifyEmail(email: string, otp: string) {
@@ -61,6 +83,7 @@ export class AuthService {
         isEmailVerified: true,
         otpCode: true,
         otpExpiresAt: true,
+        phone: true,
       },
     });
 
@@ -79,11 +102,36 @@ export class AuthService {
         otpCode: null,
         otpExpiresAt: null,
       },
-      select: { id: true, email: true, username: true, role: true },
+      select: { id: true, email: true, username: true, phone: true, role: true },
     });
 
     const token = this.signToken(updated.id, updated.email);
     return { user: updated, token };
+  }
+
+  async lookupAccount(identifier: string) {
+    const search = identifier.trim().toLowerCase();
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: search },
+          { username: { equals: search, mode: 'insensitive' } },
+          { phone: search },
+        ],
+      },
+      select: { email: true, username: true, phone: true, status: true, isEmailVerified: true },
+    });
+
+    if (!user || user.status !== 'ACTIVE') {
+      throw new InvalidCredentialsError();
+    }
+
+    return {
+      email: user.email,
+      username: user.username,
+      phone: user.phone,
+      isEmailVerified: user.isEmailVerified,
+    };
   }
 
   async resendOtp(email: string) {
@@ -108,8 +156,86 @@ export class AuthService {
       data: { otpCode, otpExpiresAt },
     });
 
-    await sendOtpEmail(user.email, otpCode);
-    return { success: true, requiresOtp: true, email: user.email };
+    let devOtp: string | undefined;
+
+    try {
+      await sendOtpEmail(user.email, otpCode);
+    } catch (error) {
+      if (config.env !== 'development') {
+        throw error;
+      }
+
+      devOtp = otpCode;
+      logger.warn('Development OTP email fallback active', {
+        email: user.email,
+        otp: otpCode,
+        reason: error instanceof Error ? error.message : 'Unknown email delivery error',
+      });
+    }
+
+    return { success: true, requiresOtp: true, email: user.email, devOtp };
+  }
+
+  async forgotPassword(email: string) {
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true, email: true, status: true },
+    });
+
+    if (!user || user.status !== 'ACTIVE') {
+      throw new InvalidCredentialsError();
+    }
+
+    const otpCode = generateOtp();
+    const otpExpiresAt = new Date(Date.now() + OTP_TTL_MS);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { otpCode, otpExpiresAt },
+    });
+
+    let devOtp: string | undefined;
+
+    try {
+      await sendOtpEmail(user.email, otpCode);
+    } catch (error) {
+      if (config.env !== 'development') {
+        throw error;
+      }
+
+      devOtp = otpCode;
+      logger.warn('Development password reset OTP fallback active', {
+        email: user.email,
+        otp: otpCode,
+        reason: error instanceof Error ? error.message : 'Unknown email delivery error',
+      });
+    }
+
+    return { success: true, email: user.email, devOtp };
+  }
+
+  async resetPassword(email: string, otp: string, password: string) {
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true, email: true, status: true, otpCode: true, otpExpiresAt: true },
+    });
+
+    if (!user || user.status !== 'ACTIVE') {
+      throw new InvalidCredentialsError();
+    }
+
+    if (user.otpCode !== otp || !user.otpExpiresAt || user.otpExpiresAt < new Date()) {
+      throw new InvalidOtpError();
+    }
+
+    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash, otpCode: null, otpExpiresAt: null },
+    });
+
+    return { success: true, email: user.email };
   }
 
   async login(email: string, password: string) {
@@ -123,6 +249,7 @@ export class AuthService {
         status: true,
         role: true,
         isEmailVerified: true,
+        phone: true,
       },
     });
 
@@ -150,6 +277,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         username: user.username,
+        phone: user.phone,
         role: user.role,
       },
       token,

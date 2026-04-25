@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AxiosError } from "axios";
 import toast from "react-hot-toast";
-import { LogIn } from "lucide-react";
+import { Eye, EyeOff, LogIn } from "lucide-react";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { loginUser } from "@/lib/api/auth";
 import type { ApiError } from "@/types/api";
@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useT } from "@/lib/i18n/use-t";
+import { usePreferencesStore } from "@/lib/stores/preferences-store";
 import {
   Card,
   CardHeader,
@@ -32,9 +33,11 @@ export function LoginForm() {
   const router = useRouter();
   const login = useAuthStore((s) => s.login);
   const t = useT();
+  const isVietnamese = usePreferencesStore((state) => state.language === "vi");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -42,13 +45,13 @@ export function LoginForm() {
     const next: FormErrors = {};
 
     if (!email.trim()) {
-      next.email = "Email is required";
+      next.email = isVietnamese ? "Vui lòng nhập email" : "Email is required";
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      next.email = "Invalid email format";
+      next.email = isVietnamese ? "Email không hợp lệ" : "Invalid email format";
     }
 
     if (!password) {
-      next.password = "Password is required";
+      next.password = isVietnamese ? "Vui lòng nhập mật khẩu" : "Password is required";
     }
 
     setErrors(next);
@@ -65,20 +68,20 @@ export function LoginForm() {
     try {
       const res = await loginUser({ email: email.trim(), password });
       login(res.user, res.token);
-      toast.success("Welcome back!");
+      toast.success(isVietnamese ? "Chào mừng bạn quay lại!" : "Welcome back!");
       router.push(res.user.role === "USER" ? "/dashboard" : "/admin");
     } catch (err) {
       const axiosErr = err as AxiosError<ApiError>;
       const msg =
         axiosErr.response?.data?.message ||
         axiosErr.response?.data?.error ||
-        "Login failed. Please try again.";
+        (isVietnamese ? "Đăng nhập thất bại. Vui lòng thử lại." : "Login failed. Please try again.");
 
       if (axiosErr.response?.data?.requiresOtp) {
         setErrors({ general: msg });
         router.push(`/register?email=${encodeURIComponent(axiosErr.response.data.email || email.trim())}&verify=1`);
       } else if (axiosErr.response?.status === 403) {
-        setErrors({ general: "Account suspended. Contact support." });
+        setErrors({ general: isVietnamese ? "Tài khoản đã bị tạm ngưng. Vui lòng liên hệ hỗ trợ." : "Account suspended. Contact support." });
       } else {
         setErrors({ general: msg });
       }
@@ -91,7 +94,7 @@ export function LoginForm() {
     <Card>
       <CardHeader>
         <CardTitle>{t("common.login")}</CardTitle>
-        <CardDescription>{t("dashboard.newOrder") === "Đặt dịch vụ" ? "Đăng nhập để tiếp tục sử dụng 3Flames" : "Enter your credentials to continue"}</CardDescription>
+        <CardDescription>{isVietnamese ? "Đăng nhập để tiếp tục sử dụng 3Flames" : "Enter your credentials to continue"}</CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="space-y-4">
@@ -116,17 +119,29 @@ export function LoginForm() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              placeholder="Your password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              error={errors.password}
-              autoComplete="current-password"
-              disabled={isSubmitting}
-            />
+            <Label htmlFor="password">{isVietnamese ? "Mật khẩu" : "Password"}</Label>
+            <div className="relative">
+              <Input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                placeholder={isVietnamese ? "Mật khẩu của bạn" : "Your password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                error={errors.password}
+                autoComplete="current-password"
+                disabled={isSubmitting}
+                className="pr-11"
+              />
+              <button
+                type="button"
+                className="absolute right-3 top-2.5 text-app-muted transition-colors hover:text-app-fg disabled:opacity-50"
+                onClick={() => setShowPassword((value) => !value)}
+                disabled={isSubmitting}
+                aria-label={showPassword ? (isVietnamese ? "Ẩn mật khẩu" : "Hide password") : (isVietnamese ? "Hiện mật khẩu" : "Show password")}
+              >
+                {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+              </button>
+            </div>
           </div>
         </CardContent>
 
@@ -135,8 +150,11 @@ export function LoginForm() {
             <LogIn className="mr-2 h-4 w-4" />
             {t("common.login")}
           </Button>
+          <Link href="/recover" className="text-sm text-brand-500 transition-colors hover:text-brand-400">
+            {isVietnamese ? "Quên tài khoản hoặc mật khẩu?" : "Forgot account or password?"}
+          </Link>
           <p className="text-sm text-app-muted">
-            {t("dashboard.newOrder") === "Đặt dịch vụ" ? "Chưa có tài khoản?" : "Don&apos;t have an account?"}{" "}
+            {isVietnamese ? "Chưa có tài khoản?" : "Don't have an account?"}{" "}
             <Link href="/register" className="text-brand-500 hover:text-brand-400 transition-colors">
               {t("common.register")}
             </Link>

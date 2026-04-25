@@ -57,6 +57,7 @@ export interface AdminUser {
   id: string;
   email: string;
   username: string;
+  phone?: string | null;
   balance: string;
   role: UserRole;
   status: "ACTIVE" | "SUSPENDED" | "BANNED";
@@ -107,6 +108,83 @@ export interface GetUsersParams {
   search?: string;
   role?: UserRole | "";
   status?: AdminUser["status"] | "";
+}
+
+export type DepositStatus = "PENDING" | "CONFIRMED" | "EXPIRED" | "FAILED";
+
+export interface AdminDepositRequest {
+  id: string;
+  userId: string;
+  memo: string;
+  amountVnd: string;
+  status: DepositStatus;
+  providerPaymentId: string | null;
+  transactionId: string | null;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+  user: Pick<AdminUser, "id" | "email" | "username" | "balance" | "role" | "status">;
+}
+
+export interface GetDepositsParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  status?: DepositStatus | "";
+}
+
+export interface ConfirmDepositResponse {
+  message: string;
+  depositId: string;
+  userId: string;
+  amount: string;
+  previousBalance: string;
+  newBalance: string;
+  transactionId: string;
+}
+
+export interface AdminUserDetail {
+  user: AdminUser & {
+    acceptedTosVersion: string;
+    isEmailVerified: boolean;
+    updatedAt: string;
+    totalDeposits: number;
+  };
+  orders: Array<{
+    id: string;
+    link: string;
+    quantity: number;
+    charge: string;
+    cost: string;
+    status: string;
+    startCount: number | null;
+    remains: number | null;
+    apiOrderId: string | null;
+    createdAt: string;
+    updatedAt: string;
+    service: { id: string; name: string; category: string; type: string };
+  }>;
+  deposits: Array<{
+    id: string;
+    memo: string;
+    amountVnd: number;
+    status: DepositStatus;
+    providerPaymentId: string | null;
+    transactionId: string | null;
+    expiresAt: string;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  transactions: Array<{
+    id: string;
+    type: string;
+    amount: string;
+    balanceAfter: string;
+    orderId: string | null;
+    description: string;
+    createdAt: string;
+  }>;
+  activity: AuditLog[];
 }
 
 export interface AdminPricingService {
@@ -172,6 +250,38 @@ export async function getUsers(params: GetUsersParams = {}): Promise<PaginatedRe
   return res.data;
 }
 
+export async function fetchAdminDeposits(params: GetDepositsParams = {}): Promise<PaginatedResponse<AdminDepositRequest>> {
+  const query: Record<string, string | number> = {
+    page: params.page ?? 1,
+    limit: params.limit ?? 20,
+  };
+  if (params.search) query.search = params.search;
+  if (params.status) query.status = params.status;
+  const res = await api.get<PaginatedResponse<AdminDepositRequest>>("/admin/deposits", { params: query });
+  return res.data;
+}
+
+export async function confirmAdminDeposit(
+  depositId: string,
+  payload: { providerPaymentId?: string; note?: string } = {},
+): Promise<ConfirmDepositResponse> {
+  const res = await api.post<ConfirmDepositResponse>(`/admin/deposits/${depositId}/confirm`, payload);
+  return res.data;
+}
+
+export async function rejectAdminDeposit(depositId: string, reason: string): Promise<{ message: string; depositId: string; status: DepositStatus }> {
+  const res = await api.post<{ message: string; depositId: string; status: DepositStatus }>(
+    `/admin/deposits/${depositId}/reject`,
+    { reason },
+  );
+  return res.data;
+}
+
+export async function getUserDetail(userId: string): Promise<AdminUserDetail> {
+  const res = await api.get<AdminUserDetail>(`/admin/users/${userId}`);
+  return res.data;
+}
+
 export async function adjustBalance(
   userId: string,
   amount: number,
@@ -213,6 +323,11 @@ export async function unsuspendUser(
   const res = await api.post<{ message: string }>(
     `/admin/users/${userId}/unsuspend`,
   );
+  return res.data;
+}
+
+export async function deleteUser(userId: string): Promise<{ message: string; userId: string; status: AdminUser["status"] }> {
+  const res = await api.delete<{ message: string; userId: string; status: AdminUser["status"] }>(`/admin/users/${userId}`);
   return res.data;
 }
 

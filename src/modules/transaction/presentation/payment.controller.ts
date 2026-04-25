@@ -34,8 +34,8 @@ paymentRouter.post(
         },
       });
 
-      const { bankBin, accountNumber } = config.vietqr;
-      const qrUrl = `https://img.vietqr.io/image/${bankBin}-${accountNumber}-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(memo)}&accountName=${encodeURIComponent('3FLAMES')}`;
+      const { bankBin, accountNumber, accountName } = config.vietqr;
+      const qrUrl = `https://img.vietqr.io/image/${bankBin}-${accountNumber}-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(memo)}&accountName=${encodeURIComponent(accountName)}`;
 
       logger.info('Payment QR generated', {
         userId,

@@ -23,12 +23,13 @@ export function calcCharge(quantity: number, sellingPricePerK: string): string {
 }
 
 export function formatUsd(value: string, decimals: number = 2): string {
-  const parts = value.split(".");
-  const intPart = parts[0] || "0";
-  const fracPart = (parts[1] || "").padEnd(decimals, "0").slice(0, decimals);
-
-  const formatted = Number(intPart).toLocaleString("en-US");
-  return `$${formatted}.${fracPart}`;
+  const amount = Number(value || 0);
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: decimals,
+  }).format(amount);
 }
 
 export function usdToVnd(valueUsd: string, rate: string): number {

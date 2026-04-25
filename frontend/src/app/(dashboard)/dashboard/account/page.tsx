@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { AxiosError } from "axios";
 import toast from "react-hot-toast";
-import { KeyRound, Loader2, Lock, ReceiptText, Save, UserRound } from "lucide-react";
+import { KeyRound, Loader2, Lock, Phone, ReceiptText, Save, UserRound } from "lucide-react";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { usePreferencesStore } from "@/lib/stores/preferences-store";
 import { useExchangeRateStore } from "@/lib/stores/exchange-rate-store";
@@ -68,6 +68,7 @@ export default function AccountPage() {
 
   const [email, setEmail] = useState(user?.email ?? "");
   const [username, setUsername] = useState(user?.username ?? "");
+  const [phone, setPhone] = useState(user?.phone ?? "");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -79,7 +80,8 @@ export default function AccountPage() {
   useEffect(() => {
     setEmail(user?.email ?? "");
     setUsername(user?.username ?? "");
-  }, [user?.email, user?.username]);
+    setPhone(user?.phone ?? "");
+  }, [user?.email, user?.phone, user?.username]);
 
   useEffect(() => {
     let cancelled = false;
@@ -101,9 +103,14 @@ export default function AccountPage() {
 
   async function handleProfileSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (phone.trim() && !/^\+?[0-9]{8,15}$/.test(phone.trim())) {
+      toast.error("Số điện thoại không hợp lệ");
+      return;
+    }
+
     setIsSavingProfile(true);
     try {
-      await updateProfile({ email, username });
+      await updateProfile({ email, username, phone: phone.trim() || undefined });
       await loadProfile();
       toast.success("Đã cập nhật tài khoản");
     } catch (error) {
@@ -178,6 +185,21 @@ export default function AccountPage() {
                       onChange={(e) => setEmail(e.target.value)}
                       required
                     />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="phone">Số điện thoại (tuỳ chọn)</Label>
+                    <div className="relative">
+                      <Input
+                        id="phone"
+                        type="tel"
+                        inputMode="tel"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder="0987654321"
+                        className="pl-10"
+                      />
+                      <Phone className="pointer-events-none absolute left-3 top-2.5 h-5 w-5 text-app-muted" />
+                    </div>
                   </div>
                 </div>
                 <Button type="submit" disabled={isSavingProfile}>
@@ -259,6 +281,10 @@ export default function AccountPage() {
                 <div className="rounded-lg border border-app-border p-3">
                   <p className="text-app-muted">Trạng thái</p>
                   <p className="mt-1 font-semibold text-emerald-400">{user?.status === "ACTIVE" ? "Hoạt động" : user?.status}</p>
+                </div>
+                <div className="col-span-2 rounded-lg border border-app-border p-3">
+                  <p className="text-app-muted">Số điện thoại</p>
+                  <p className="mt-1 font-semibold text-app-fg">{user?.phone || "Chưa thêm"}</p>
                 </div>
               </div>
             </CardContent>

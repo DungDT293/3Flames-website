@@ -56,11 +56,17 @@ const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api/v1";
 
 const EXPIRY_SECONDS = 5 * 60;
+const VIETQR_BANK_BIN = "970407";
+const VIETQR_ACCOUNT_NUMBER = "8129032003";
+const VIETQR_ACCOUNT_NAME = "DONG TIEN DUNG";
+const VIETQR_BANK_NAME = "Techcombank";
 
 export default function AddFundsPage() {
   const updateBalance = useAuthStore((s) => s.updateBalance);
   const balance = useAuthStore((s) => s.balance);
   const currency = usePreferencesStore((s) => s.currency);
+  const language = usePreferencesStore((s) => s.language);
+  const isVietnamese = language === "vi";
   const rate = useExchangeRateStore((s) => s.rate);
 
   const [step, setStep] = useState<1 | 2>(1);
@@ -86,6 +92,8 @@ export default function AddFundsPage() {
   });
 
   const watchedAmount = watch("amount");
+  const previewAmount = watchedAmount && watchedAmount >= 10_000 ? watchedAmount : 0;
+  const previewQrUrl = `https://img.vietqr.io/image/${VIETQR_BANK_BIN}-${VIETQR_ACCOUNT_NUMBER}-compact2.png?${previewAmount ? `amount=${previewAmount}&` : ""}accountName=${encodeURIComponent(VIETQR_ACCOUNT_NAME)}`;
 
   // Cleanup SSE + timer on unmount or step change
   const cleanup = useCallback(() => {
@@ -112,7 +120,7 @@ export default function AddFundsPage() {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           handleCancel();
-          toast.error("Payment session expired. Please generate a new QR code.");
+          toast.error(isVietnamese ? "Phiên thanh toán đã hết hạn. Vui lòng tạo mã QR mới." : "Payment session expired. Please generate a new QR code.");
           return 0;
         }
         return prev - 1;
@@ -176,7 +184,7 @@ export default function AddFundsPage() {
                 const data = JSON.parse(line.slice(6));
                 updateBalance(data.newBalance);
                 toast.success(
-                  `Deposit successful! +${formatVnd(qrData?.amount || 0)}`,
+                  `${isVietnamese ? "Nạp tiền thành công" : "Deposit successful"}! +${formatVnd(qrData?.amount || 0)}`,
                   { duration: 6000 },
                 );
                 cleanup();
@@ -215,7 +223,7 @@ export default function AddFundsPage() {
       const msg =
         axiosErr.response?.data?.message ||
         axiosErr.response?.data?.error ||
-        "Failed to generate QR code.";
+        (isVietnamese ? "Không thể tạo mã QR." : "Failed to generate QR code.");
       toast.error(msg);
     } finally {
       setIsGenerating(false);
@@ -234,10 +242,10 @@ export default function AddFundsPage() {
     try {
       await navigator.clipboard.writeText(qrData.memo);
       setMemoCopied(true);
-      toast.success("Memo copied to clipboard");
+      toast.success(isVietnamese ? "Đã sao chép nội dung chuyển khoản" : "Memo copied to clipboard");
       setTimeout(() => setMemoCopied(false), 2000);
     } catch {
-      toast.error("Failed to copy memo");
+      toast.error(isVietnamese ? "Không thể sao chép nội dung chuyển khoản" : "Failed to copy memo");
     }
   }
 
@@ -245,14 +253,14 @@ export default function AddFundsPage() {
   const seconds = timeLeft % 60;
 
   return (
-    <div className="mx-auto max-w-lg space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-zinc-100 flex items-center gap-2">
           <Wallet className="h-6 w-6 text-brand-500" />
-          Add Funds
+          {isVietnamese ? "Nạp tiền" : "Add Funds"}
         </h1>
         <p className="mt-1 text-sm text-zinc-500">
-          Current balance:{" "}
+          {isVietnamese ? "Số dư hiện tại" : "Current balance"}:{" "}
           <span className="text-brand-500 font-semibold">
             {formatDisplayMoney(balance, currency, rate?.rate)}
           </span>
@@ -266,22 +274,23 @@ export default function AddFundsPage() {
 
       {/* ─── Step 1: Amount Input ─────────────────────────── */}
       {step === 1 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Banknote className="h-5 w-5 text-brand-500" />
-              Deposit Amount
-            </CardTitle>
-            <CardDescription>
-              Select or enter the amount you want to deposit (VND)
-            </CardDescription>
-          </CardHeader>
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Banknote className="h-5 w-5 text-brand-500" />
+                {isVietnamese ? "Số tiền nạp" : "Deposit Amount"}
+              </CardTitle>
+              <CardDescription>
+                {isVietnamese ? "Chọn hoặc nhập số tiền muốn nạp (VND)." : "Select or enter the amount you want to deposit (VND)."}
+              </CardDescription>
+            </CardHeader>
 
-          <CardContent>
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+            <CardContent>
+              <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
               {/* Quick select buttons */}
               <div className="space-y-2">
-                <Label>Quick Select</Label>
+                <Label>{isVietnamese ? "Chọn nhanh" : "Quick Select"}</Label>
                 <div className="grid grid-cols-5 gap-2">
                   {QUICK_AMOUNTS.map((qa) => (
                     <button
@@ -304,11 +313,11 @@ export default function AddFundsPage() {
 
               {/* Custom amount */}
               <div className="space-y-2">
-                <Label htmlFor="amount">Custom Amount (VND)</Label>
+                <Label htmlFor="amount">{isVietnamese ? "Số tiền tuỳ chỉnh (VND)" : "Custom Amount (VND)"}</Label>
                 <Input
                   id="amount"
                   type="number"
-                  placeholder="Enter amount (min 10,000)"
+                  placeholder={isVietnamese ? "Nhập số tiền (tối thiểu 10.000)" : "Enter amount (min 10,000)"}
                   {...register("amount", { valueAsNumber: true })}
                   error={errors.amount?.message}
                   min={10_000}
@@ -330,11 +339,50 @@ export default function AddFundsPage() {
                 disabled={isGenerating || !watchedAmount}
               >
                 <QrCode className="mr-2 h-5 w-5" />
-                Generate Payment QR
+                {isVietnamese ? "Tạo mã QR nạp tiền" : "Generate Payment QR"}
               </Button>
-            </form>
-          </CardContent>
-        </Card>
+              </form>
+            </CardContent>
+          </Card>
+
+          <Card className="overflow-hidden">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <QrCode className="h-5 w-5 text-brand-500" />
+                VietQR Techcombank
+              </CardTitle>
+              <CardDescription>
+                {isVietnamese ? "Quét mã hoặc chuyển khoản đúng thông tin bên dưới." : "Scan the code or transfer to the details below."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-2xl bg-white p-4">
+                <img
+                  src={previewQrUrl}
+                  alt="VietQR Techcombank DONG TIEN DUNG"
+                  className="mx-auto h-64 w-64 object-contain"
+                />
+              </div>
+              <div className="space-y-3 rounded-xl border border-app-border bg-app-elevated/60 p-4 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-app-muted">Tên chủ TK</span>
+                  <span className="font-semibold text-app-fg">{VIETQR_ACCOUNT_NAME}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-app-muted">Số TK</span>
+                  <span className="font-mono font-bold text-brand-500">{VIETQR_ACCOUNT_NUMBER}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-app-muted">Ngân hàng</span>
+                  <span className="font-semibold text-app-fg">{VIETQR_BANK_NAME}</span>
+                </div>
+              </div>
+              <p className="text-xs leading-5 text-app-muted">
+                {isVietnamese ? "Sau khi nhập số tiền, bấm tạo QR để hệ thống sinh nội dung chuyển khoản riêng. Hiện tại giao dịch ngân hàng cần được admin xác nhận trước khi cộng số dư." : "After entering an amount, generate a QR code to create a unique transfer memo. Bank transfers currently need admin confirmation before balance is credited."}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {/* ─── Step 2: QR Display + SSE Listening ──────────── */}
@@ -344,7 +392,7 @@ export default function AddFundsPage() {
             <div className="flex items-center justify-between">
               <CardTitle className="flex items-center gap-2 text-lg">
                 <QrCode className="h-5 w-5 text-brand-500" />
-                Scan to Pay
+                {isVietnamese ? "Quét mã để thanh toán" : "Scan to Pay"}
               </CardTitle>
               <div className="flex items-center gap-1.5 rounded-lg bg-surface-700 px-3 py-1.5">
                 <Clock className="h-4 w-4 text-brand-500" />
@@ -358,7 +406,7 @@ export default function AddFundsPage() {
               </div>
             </div>
             <CardDescription>
-              Open your banking app and scan this QR code
+              {isVietnamese ? "Mở ứng dụng ngân hàng và quét mã QR này." : "Open your banking app and scan this QR code."}
             </CardDescription>
           </CardHeader>
 
@@ -377,7 +425,7 @@ export default function AddFundsPage() {
             {/* Payment Details */}
             <div className="space-y-3 rounded-lg border border-surface-500 bg-surface-700 p-4">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-zinc-400">Amount</span>
+                <span className="text-sm text-zinc-400">{isVietnamese ? "Số tiền" : "Amount"}</span>
                 <span className="text-lg font-bold text-brand-500">
                   {formatVnd(qrData.amount)}
                 </span>
@@ -386,7 +434,7 @@ export default function AddFundsPage() {
               <div className="border-t border-surface-500" />
 
               <div className="space-y-1.5">
-                <span className="text-sm text-zinc-400">Transfer Content (Memo)</span>
+                <span className="text-sm text-zinc-400">{isVietnamese ? "Nội dung chuyển khoản" : "Transfer Content (Memo)"}</span>
                 <div className="flex items-center gap-2">
                   <code className="flex-1 rounded-md bg-surface-600 px-3 py-2 text-sm font-mono text-zinc-100">
                     {qrData.memo}
@@ -395,7 +443,7 @@ export default function AddFundsPage() {
                     variant="secondary"
                     size="icon"
                     onClick={handleCopyMemo}
-                    title="Copy memo"
+                    title={isVietnamese ? "Sao chép nội dung chuyển khoản" : "Copy memo"}
                   >
                     {memoCopied ? (
                       <Check className="h-4 w-4 text-green-400" />
@@ -409,15 +457,15 @@ export default function AddFundsPage() {
 
             {/* Instructions */}
             <div className="rounded-lg bg-brand-500/5 border border-brand-500/20 p-4 space-y-2">
-              <p className="text-sm text-zinc-300 font-medium">Instructions:</p>
+              <p className="text-sm text-zinc-300 font-medium">{isVietnamese ? "Hướng dẫn:" : "Instructions:"}</p>
               <ol className="list-decimal list-inside space-y-1 text-sm text-zinc-400">
-                <li>Open your banking app and scan the QR code above</li>
+                <li>{isVietnamese ? "Mở ứng dụng ngân hàng và quét mã QR phía trên" : "Open your banking app and scan the QR code above"}</li>
                 <li>
-                  <span className="text-red-400 font-medium">Do not</span> change
-                  the transfer content (memo)
+                  <span className="text-red-400 font-medium">{isVietnamese ? "Không" : "Do not"}</span>{" "}
+                  {isVietnamese ? "thay đổi nội dung chuyển khoản" : "change the transfer content (memo)"}
                 </li>
-                <li>Confirm the payment in your banking app</li>
-                <li>Your balance will update automatically within 1-3 minutes</li>
+                <li>{isVietnamese ? "Xác nhận chuyển khoản trong ứng dụng ngân hàng" : "Confirm the payment in your banking app"}</li>
+                <li>{isVietnamese ? "Admin sẽ đối soát giao dịch và cộng số dư sau khi tiền về tài khoản" : "An admin will reconcile the transfer and credit your balance after the bank payment arrives"}</li>
               </ol>
             </div>
 
@@ -425,7 +473,7 @@ export default function AddFundsPage() {
             <div className="flex items-center justify-center gap-2 py-2">
               <Loader2 className="h-4 w-4 animate-spin text-brand-500" />
               <span className="text-sm text-zinc-400">
-                Waiting for payment confirmation...
+                {isVietnamese ? "Đang chờ admin xác nhận giao dịch..." : "Waiting for admin payment confirmation..."}
               </span>
             </div>
 
@@ -436,7 +484,7 @@ export default function AddFundsPage() {
               onClick={handleCancel}
             >
               <ArrowLeft className="mr-2 h-4 w-4" />
-              Cancel and go back
+              {isVietnamese ? "Huỷ và quay lại" : "Cancel and go back"}
             </Button>
           </CardContent>
         </Card>

@@ -13,6 +13,7 @@ import {
   Activity,
   ClipboardList,
   Tags,
+  WalletCards,
   ArrowLeft,
   Menu,
   X,
@@ -32,6 +33,7 @@ const ROLE_RANK = {
 const ADMIN_NAV = [
   { href: "/admin", label: "Tổng quan", icon: BarChart3, minRole: "SUPPORT" },
   { href: "/admin/users", label: "Người dùng", icon: Users, minRole: "SUPPORT" },
+  { href: "/admin/deposits", label: "Nạp tiền", icon: WalletCards, minRole: "ADMIN" },
   { href: "/admin/logs", label: "Nhật ký", icon: ClipboardList, minRole: "ADMIN" },
   { href: "/admin/pricing", label: "Giá dịch vụ", icon: Tags, minRole: "ADMIN" },
   { href: "/admin/system", label: "Hệ thống", icon: Activity, minRole: "ADMIN" },

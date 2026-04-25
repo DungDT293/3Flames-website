@@ -7,13 +7,16 @@ import { z } from "zod";
 import toast from "react-hot-toast";
 import { AxiosError } from "axios";
 import {
-  ShoppingCart,
-  Zap,
-  Link as LinkIcon,
-  Hash,
   AlertTriangle,
-  Loader2,
+  Facebook,
+  Hash,
   Info,
+  Layers,
+  Link as LinkIcon,
+  Loader2,
+  ShoppingCart,
+  Youtube,
+  Zap,
 } from "lucide-react";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { usePreferencesStore } from "@/lib/stores/preferences-store";
@@ -22,11 +25,10 @@ import { fetchServices, type ServicesResponse } from "@/lib/api/services";
 import { placeOrder } from "@/lib/api/orders";
 import type { ApiError, Service } from "@/types/api";
 import { calcCharge, compareCurrency, formatDisplayMoney } from "@/lib/utils/currency";
-import { cleanServiceText, sanitizeServiceDescription } from "@/lib/utils/service-copy";
+import { localizeServiceText, sanitizeServiceDescription, servicePlatform } from "@/lib/utils/service-copy";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
 import {
   Card,
   CardHeader,
@@ -54,6 +56,8 @@ export default function NewOrderPage() {
   const balance = useAuthStore((s) => s.balance);
   const updateBalance = useAuthStore((s) => s.updateBalance);
   const currency = usePreferencesStore((s) => s.currency);
+  const language = usePreferencesStore((s) => s.language);
+  const isVietnamese = language === "vi";
   const rate = useExchangeRateStore((s) => s.rate);
 
   const [servicesData, setServicesData] = useState<ServicesResponse | null>(null);
@@ -152,7 +156,7 @@ export default function NewOrderPage() {
     return compareCurrency(charge, balance) > 0;
   }, [charge, balance]);
 
-  const selectedDescription = sanitizeServiceDescription(selectedService?.description);
+  const selectedDescription = sanitizeServiceDescription(selectedService?.description, language);
 
   // Category change handler
   function handleCategoryChange(cat: string) {
@@ -255,42 +259,78 @@ export default function NewOrderPage() {
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
               {/* Category Selection */}
               <div className="space-y-2">
-                <Label htmlFor="category">Danh mục</Label>
-                <Select
-                  id="category"
-                  placeholder="Chọn danh mục"
-                  value={selectedCategory}
-                  onChange={(e) => handleCategoryChange(e.target.value)}
-                  error={errors.category?.message}
-                >
-                  {categories.map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cleanServiceText(cat)}
-                    </option>
-                  ))}
-                </Select>
+                <Label>{isVietnamese ? "Danh mục" : "Category"}</Label>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {categories.map((cat) => {
+                    const platform = servicePlatform(cat);
+                    const Icon = platform === "facebook" ? Facebook : platform === "youtube" ? Youtube : Layers;
+                    return (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => handleCategoryChange(cat)}
+                        className={`flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-colors ${selectedCategory === cat ? "border-brand-500 bg-brand-500/15 text-brand-300" : "border-app-border bg-app-elevated/50 text-app-muted hover:border-brand-500/40 hover:text-app-fg"}`}
+                        disabled={isSubmitting}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" />
+                        <span className="truncate">{localizeServiceText(cat, language)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {errors.category?.message && (
+                  <p className="text-sm text-red-400">{errors.category.message}</p>
+                )}
               </div>
 
               {/* Service Selection */}
               <div className="space-y-2">
-                <Label htmlFor="service_id">Dịch vụ</Label>
-                <Select
-                  id="service_id"
-                  placeholder="Chọn dịch vụ"
-                  value={watchedServiceId}
-                  onChange={(e) => handleServiceChange(e.target.value)}
-                  disabled={!selectedCategory}
-                  error={errors.service_id?.message}
-                >
-                  {filteredServices.map((svc) => (
-                    <option key={svc.id} value={svc.id}>
-                      {cleanServiceText(svc.name)} — {formatDisplayMoney(svc.sellingPrice, currency, rate?.rate, 4)}/1K
-                    </option>
-                  ))}
-                </Select>
+                <Label>{isVietnamese ? "Dịch vụ" : "Service"}</Label>
+                {!selectedCategory ? (
+                  <div className="rounded-xl border border-dashed border-app-border bg-app-elevated/30 px-4 py-6 text-center text-sm text-app-muted">
+                    {isVietnamese ? "Chọn danh mục trước để xem dịch vụ phù hợp." : "Choose a category first to see matching services."}
+                  </div>
+                ) : (
+                  <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+                    {filteredServices.map((svc) => {
+                      const platform = servicePlatform(`${svc.category} ${svc.name}`);
+                      const Icon = platform === "facebook" ? Facebook : platform === "youtube" ? Youtube : Layers;
+                      return (
+                        <button
+                          key={svc.id}
+                          type="button"
+                          onClick={() => handleServiceChange(svc.id)}
+                          className={`w-full rounded-xl border p-3 text-left transition-colors ${watchedServiceId === svc.id ? "border-brand-500 bg-brand-500/15" : "border-app-border bg-app-elevated/50 hover:border-brand-500/40"}`}
+                          disabled={isSubmitting}
+                        >
+                          <div className="flex items-start gap-3">
+                            <span className="rounded-lg border border-app-border bg-app-card p-2 text-app-muted">
+                              <Icon className="h-4 w-4" />
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="line-clamp-2 text-sm font-medium text-app-fg">
+                                {localizeServiceText(svc.name, language)}
+                              </p>
+                              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-app-muted">
+                                <span>{formatDisplayMoney(svc.sellingPrice, currency, rate?.rate, 4)} / {isVietnamese ? "1.000" : "1K"}</span>
+                                <span>•</span>
+                                <span>{isVietnamese ? "Tối thiểu" : "Min"}: {svc.minQuantity.toLocaleString(isVietnamese ? "vi-VN" : "en-US")}</span>
+                                <span>•</span>
+                                <span>{isVietnamese ? "Tối đa" : "Max"}: {svc.maxQuantity.toLocaleString(isVietnamese ? "vi-VN" : "en-US")}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {errors.service_id?.message && (
+                  <p className="text-sm text-red-400">{errors.service_id.message}</p>
+                )}
                 {selectedDescription && (
                   <p className="flex items-start gap-1.5 text-xs text-app-muted">
-                    <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                     {selectedDescription}
                   </p>
                 )}

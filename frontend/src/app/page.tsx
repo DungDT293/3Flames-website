@@ -40,10 +40,10 @@ import { cleanServiceText } from "@/lib/utils/service-copy";
 import type { Service } from "@/types/api";
 
 const stats = [
-  { labelKey: "landing.activeUsers", value: "10K+", icon: Users },
-  { labelKey: "landing.ordersProcessed", value: "5M+", icon: Package },
-  { labelKey: "landing.uptime", value: "99.9%", icon: Activity },
-  { labelKey: "landing.liveCatalog", value: "75+", icon: Layers3 },
+  { labelKey: "landing.activeUsers", value: 10, suffix: "K+", icon: Users },
+  { labelKey: "landing.ordersProcessed", value: 5, suffix: "M+", icon: Package },
+  { labelKey: "landing.uptime", value: 99.9, suffix: "%", decimals: 1, icon: Activity },
+  { labelKey: "landing.liveCatalog", value: 75, suffix: "+", icon: Layers3 },
 ] as const;
 
 const features = [
@@ -68,71 +68,119 @@ const fallbackServices = [
   {
     platform: "YouTube",
     icon: Youtube,
-    title: "YouTube Subscribers",
-    match: ["subscriber", "subs"],
-    metric: "High retention",
+    title: { vi: "Người đăng ký YouTube", en: "YouTube Subscribers" },
+    match: ["subscriber", "subscribers", "subs", "đăng ký"],
+    metric: { vi: "Giữ chân cao", en: "High retention" },
+    fallbackPriceUsd: "1.67",
     accent: "from-red-500/20 to-brand-500/10",
   },
   {
     platform: "YouTube",
     icon: Youtube,
-    title: "YouTube Real Views",
-    match: ["native views", "real views", "views direct"],
-    metric: "Never drop",
+    title: { vi: "Lượt xem YouTube thật", en: "YouTube Real Views" },
+    match: ["native views", "real views", "views direct", "view", "views", "lượt xem"],
+    metric: { vi: "Ổn định, hạn chế tụt", en: "Never drop" },
+    fallbackPriceUsd: "0.45",
     accent: "from-brand-500/20 to-red-500/10",
   },
   {
     platform: "Facebook",
     icon: Facebook,
-    title: "Facebook Page Likes",
-    match: ["page likes", "facebook likes", "fb likes"],
-    metric: "Profile quality",
+    title: { vi: "Like trang Facebook", en: "Facebook Page Likes" },
+    match: ["page likes", "facebook likes", "fb likes", "like", "likes"],
+    metric: { vi: "Tài khoản chất lượng", en: "Profile quality" },
+    fallbackPriceUsd: "1.2",
     accent: "from-blue-500/20 to-brand-500/10",
   },
   {
     platform: "YouTube",
     icon: Youtube,
-    title: "YouTube Watch Hours",
-    match: ["watch time", "watch hours"],
-    metric: "Monetization ready",
+    title: { vi: "Giờ xem YouTube", en: "YouTube Watch Hours" },
+    match: ["watch time", "watch hours", "hours", "giờ xem"],
+    metric: { vi: "Sẵn sàng bật kiếm tiền", en: "Monetization ready" },
+    fallbackPriceUsd: "4.9",
     accent: "from-amber-500/20 to-brand-500/10",
   },
 ];
 
 const pipeline = [
-  { label: "Nạp tiền", value: "VietQR / Crypto", icon: WalletCards },
-  { label: "Đặt dịch vụ", value: "Dashboard thông minh", icon: Gauge },
-  { label: "Theo dõi", value: "Cập nhật trực tiếp", icon: Radio },
-  { label: "Mở rộng", value: "Tăng trưởng an toàn", icon: TrendingUp },
+  { label: { vi: "Nạp tiền", en: "Deposit" }, value: { vi: "VietQR / Crypto", en: "VietQR / Crypto" }, icon: WalletCards },
+  { label: { vi: "Đặt dịch vụ", en: "Place order" }, value: { vi: "Dashboard thông minh", en: "Smart dashboard" }, icon: Gauge },
+  { label: { vi: "Theo dõi", en: "Track" }, value: { vi: "Cập nhật trực tiếp", en: "Live updates" }, icon: Radio },
+  { label: { vi: "Mở rộng", en: "Scale" }, value: { vi: "Tăng trưởng an toàn", en: "Safe growth" }, icon: TrendingUp },
 ];
 
 const terminalLines = [
-  { key: "status", value: "order.accepted", tone: "text-emerald-400" },
-  { key: "service", value: "youtube.real_views" },
-  { key: "quantity", value: "10,000" },
-  { key: "delivery", value: "processing", tone: "text-brand-400" },
-  { key: "webhook", value: "live_status_stream", tone: "text-sky-400" },
+  { key: { vi: "trạng thái", en: "status" }, value: { vi: "đơn đã nhận", en: "order.accepted" }, tone: "text-emerald-400" },
+  { key: { vi: "dịch vụ", en: "service" }, value: { vi: "youtube.luot_xem_that", en: "youtube.real_views" } },
+  { key: { vi: "số lượng", en: "quantity" }, value: { vi: "10.000", en: "10,000" } },
+  { key: { vi: "xử lý", en: "delivery" }, value: { vi: "đang chạy", en: "processing" }, tone: "text-brand-400" },
+  { key: { vi: "cập nhật", en: "webhook" }, value: { vi: "theo_doi_truc_tiep", en: "live_status_stream" }, tone: "text-sky-400" },
 ];
 
 type LandingService = (typeof fallbackServices)[number] & {
   service?: Service;
 };
 
-function findMatchingService(data: ServicesResponse | null, match: readonly string[]): Service | undefined {
+type Stat = (typeof stats)[number];
+
+function AnimatedStatValue({ stat, className = "text-2xl font-black" }: { stat: Stat; className?: string }) {
+  const [value, setValue] = useState(0);
+
+  useEffect(() => {
+    let frameId = 0;
+    const duration = 1100;
+    const start = performance.now();
+
+    const tick = (now: number) => {
+      const progress = Math.min((now - start) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setValue(stat.value * eased);
+      if (progress < 1) frameId = requestAnimationFrame(tick);
+    };
+
+    frameId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frameId);
+  }, [stat.value]);
+
+  const decimals = "decimals" in stat ? stat.decimals : 0;
+  const display = value.toLocaleString("en-US", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+
+  return <p className={className}>{display}{stat.suffix}</p>;
+}
+
+function serviceText(service: Service): string {
+  return `${cleanServiceText(service.name)} ${cleanServiceText(service.category)} ${cleanServiceText(service.description || "")}`.toLowerCase();
+}
+
+function servicePlatform(service: Service): "YouTube" | "Facebook" | "Other" {
+  const text = serviceText(service);
+  if (text.includes("youtube") || text.includes("yt")) return "YouTube";
+  if (text.includes("facebook") || text.includes("fb")) return "Facebook";
+  return "Other";
+}
+
+function findMatchingService(data: ServicesResponse | null, platform: string, match: readonly string[]): Service | undefined {
   if (!data) return undefined;
 
   const services = Object.values(data.services).flat();
-  return services.find((service) => {
-    const name = cleanServiceText(service.name).toLowerCase();
-    const category = cleanServiceText(service.category).toLowerCase();
-    return match.some((term) => name.includes(term) || category.includes(term));
-  });
+  const samePlatform = services.filter((service) => servicePlatform(service) === platform);
+  const pool = samePlatform.length > 0 ? samePlatform : services;
+
+  return pool.find((service) => {
+    const text = serviceText(service);
+    return match.some((term) => text.includes(term));
+  }) || samePlatform[0] || services[0];
 }
 
 export default function LandingPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [serviceData, setServiceData] = useState<ServicesResponse | null>(null);
   const t = useT();
+  const language = usePreferencesStore((state) => state.language);
   const currency = usePreferencesStore((state) => state.currency);
   const rate = useExchangeRateStore((state) => state.rate);
   const loadRate = useExchangeRateStore((state) => state.loadRate);
@@ -149,7 +197,7 @@ export default function LandingPage() {
   const landingServices = useMemo<LandingService[]>(
     () => fallbackServices.map((service) => ({
       ...service,
-      service: findMatchingService(serviceData, service.match),
+      service: findMatchingService(serviceData, service.platform, service.match),
     })),
     [serviceData],
   );
@@ -172,9 +220,9 @@ export default function LandingPage() {
           </Link>
 
           <div className="hidden items-center gap-8 text-sm text-app-muted md:flex">
-            <a href="#features" className="transition-colors hover:text-app-fg">Features</a>
-            <a href="#services" className="transition-colors hover:text-app-fg">Services</a>
-            <a href="#operations" className="transition-colors hover:text-app-fg">System</a>
+            <a href="#features" className="transition-colors hover:text-app-fg">{language === "vi" ? "Tính năng" : "Features"}</a>
+            <a href="#services" className="transition-colors hover:text-app-fg">{language === "vi" ? "Dịch vụ" : "Services"}</a>
+            <a href="#operations" className="transition-colors hover:text-app-fg">{language === "vi" ? "Hệ thống" : "System"}</a>
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
@@ -200,17 +248,17 @@ export default function LandingPage() {
         </div>
       </nav>
 
-      <section className="relative px-4 pb-20 pt-32 sm:px-6 sm:pb-28 sm:pt-40 lg:px-8">
-        <div className="mx-auto grid max-w-7xl items-center gap-12 lg:grid-cols-[1.05fr_0.95fr]">
+      <section className="relative px-4 pb-20 pt-28 sm:px-6 sm:pb-28 sm:pt-36 lg:px-8">
+        <div className="mx-auto grid max-w-7xl items-center gap-12 lg:grid-cols-[minmax(0,1.25fr)_minmax(420px,0.75fr)] xl:grid-cols-[minmax(0,1.35fr)_minmax(460px,0.65fr)]">
           <div className="relative z-10">
             <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-brand-500/25 bg-brand-500/10 px-4 py-2 text-sm text-brand-200 shadow-lg shadow-brand-500/10">
               <Sparkles className="h-4 w-4 text-brand-400" />
               {t("landing.badge")}
             </div>
 
-            <h1 className="max-w-4xl text-5xl font-black leading-[0.95] tracking-tight sm:text-6xl lg:text-7xl xl:text-8xl">
+            <h1 className="max-w-5xl py-4 text-5xl font-black uppercase leading-[1.38] tracking-tight sm:text-6xl sm:leading-[1.32] lg:text-6xl lg:leading-[1.3] xl:text-7xl xl:leading-[1.26] 2xl:text-8xl 2xl:leading-[1.22]">
               {t("landing.headlineA")} {" "}
-              <span className="relative inline-block bg-gradient-to-r from-brand-300 via-brand-500 to-red-500 bg-clip-text text-transparent">
+              <span className="relative inline bg-gradient-to-r from-brand-300 via-brand-500 to-red-500 bg-clip-text py-2 text-transparent [-webkit-box-decoration-break:clone] [box-decoration-break:clone]">
                 {t("landing.headlineB")}
               </span>
             </h1>
@@ -267,7 +315,7 @@ export default function LandingPage() {
                   {stats.slice(0, 4).map((stat) => (
                     <div key={t(stat.labelKey)} className="rounded-2xl border border-white/10 bg-surface-900/70 p-4">
                       <stat.icon className="mb-3 h-5 w-5 text-brand-400" />
-                      <p className="text-2xl font-black">{stat.value}</p>
+                      <AnimatedStatValue stat={stat} />
                       <p className="mt-1 text-xs text-app-muted">{t(stat.labelKey)}</p>
                     </div>
                   ))}
@@ -282,9 +330,9 @@ export default function LandingPage() {
                   </div>
                   <div className="space-y-3">
                     {terminalLines.map((line) => (
-                      <div key={line.key} className="flex justify-between gap-4">
-                        <span className="text-app-muted">{line.key}</span>
-                        <span className={line.tone || "text-zinc-200"}>{line.value}</span>
+                      <div key={line.key.en} className="flex justify-between gap-4">
+                        <span className="text-app-muted">{line.key[language]}</span>
+                        <span className={line.tone || "text-zinc-200"}>{line.value[language]}</span>
                       </div>
                     ))}
                   </div>
@@ -293,8 +341,8 @@ export default function LandingPage() {
                 <div className="mt-5 rounded-2xl border border-brand-500/20 bg-gradient-to-r from-brand-500/10 to-red-500/10 p-4">
                   <div className="mb-3 flex items-center justify-between">
                     <div>
-                      <p className="font-semibold">Revenue dashboard</p>
-                      <p className="text-sm text-app-muted">Last 24 hours</p>
+                      <p className="font-semibold">{language === "vi" ? "Lưu lượng truy cập" : "Traffic overview"}</p>
+                      <p className="text-sm text-app-muted">{language === "vi" ? "24 giờ gần nhất" : "Last 24 hours"}</p>
                     </div>
                     <BarChart3 className="h-6 w-6 text-brand-400" />
                   </div>
@@ -318,7 +366,7 @@ export default function LandingPage() {
                 <stat.icon className="h-6 w-6 text-brand-400" />
               </div>
               <div>
-                <p className="text-2xl font-black">{stat.value}</p>
+                <AnimatedStatValue stat={stat} />
                 <p className="text-sm text-app-muted">{t(stat.labelKey)}</p>
               </div>
             </div>
@@ -354,21 +402,23 @@ export default function LandingPage() {
                   <KeyRound className="h-6 w-6 text-brand-400" />
                 </div>
                 <div>
-                  <h3 className="text-2xl font-bold">Hệ thống vận hành thông minh</h3>
-                  <p className="text-app-muted">Đặt dịch vụ nhanh, theo dõi rõ ràng</p>
+                  <h3 className="text-2xl font-bold">{language === "vi" ? "Hệ thống vận hành thông minh" : "Smart operations system"}</h3>
+                  <p className="text-app-muted">{language === "vi" ? "Đặt dịch vụ nhanh, theo dõi rõ ràng" : "Fast ordering with clear tracking"}</p>
                 </div>
               </div>
               <div className="rounded-2xl border border-white/10 bg-black/40 p-5 font-mono text-sm text-app-fg">
-                <p><span className="text-brand-400">ORDER</span> 3FL-2026-0001</p>
-                <p className="mt-3 text-app-muted">service: youtube.real_views</p>
-                <p className="mt-3 text-emerald-400">{`{ "status": "PROCESSING", "tracking": "LIVE" }`}</p>
+                <p><span className="text-brand-400">{language === "vi" ? "ĐƠN HÀNG" : "ORDER"}</span> 3FL-2026-0001</p>
+                <p className="mt-3 text-app-muted">{language === "vi" ? "dịch vụ: youtube.luot_xem_that" : "service: youtube.real_views"}</p>
+                <p className="mt-3 text-emerald-400">{language === "vi" ? `{ "trang_thai": "DANG_XU_LY", "theo_doi": "TRUC_TIEP" }` : `{ "status": "PROCESSING", "tracking": "LIVE" }`}</p>
               </div>
             </div>
 
             <div className="rounded-3xl border border-white/10 bg-surface-800/70 p-8">
               <LockKeyhole className="mb-6 h-10 w-10 text-brand-400" />
-              <h3 className="text-2xl font-bold">Protected by design</h3>
-              <p className="mt-4 leading-7 text-app-muted">Rate limits, admin controls, circuit breaker protection, and balance ledger invariants.</p>
+              <h3 className="text-2xl font-bold">{language === "vi" ? "Được bảo vệ từ thiết kế" : "Protected by design"}</h3>
+              <p className="mt-4 leading-7 text-app-muted">
+                {language === "vi" ? "Giới hạn tần suất, kiểm soát quản trị, bảo vệ circuit breaker và sổ cái số dư nhất quán." : "Rate limits, admin controls, circuit breaker protection, and balance ledger invariants."}
+              </p>
             </div>
           </div>
         </div>
@@ -378,7 +428,7 @@ export default function LandingPage() {
         <div className="mx-auto max-w-7xl">
           <div className="mb-14 flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
             <div>
-              <p className="mb-3 text-sm font-semibold uppercase tracking-[0.3em] text-brand-400">Top services</p>
+              <p className="mb-3 text-sm font-semibold uppercase tracking-[0.3em] text-brand-400">{language === "vi" ? "Dịch vụ nổi bật" : "Top services"}</p>
               <h2 className="text-4xl font-black tracking-tight sm:text-5xl">{t("landing.servicesTitle")}</h2>
               <p className="mt-5 max-w-2xl text-lg leading-8 text-app-muted">{t("landing.servicesDesc")}</p>
             </div>
@@ -389,7 +439,7 @@ export default function LandingPage() {
 
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {landingServices.map((service) => (
-              <div key={service.title} className="group relative overflow-hidden rounded-3xl border border-white/10 bg-surface-800/80 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-brand-500/40">
+              <div key={service.title.en} className="group relative overflow-hidden rounded-3xl border border-white/10 bg-surface-800/80 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-brand-500/40">
                 <div className={`absolute inset-x-0 top-0 h-28 bg-gradient-to-b ${service.accent} to-transparent`} />
                 <div className="relative">
                   <div className="mb-8 flex items-center justify-between">
@@ -398,15 +448,13 @@ export default function LandingPage() {
                     </div>
                     <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-app-muted">{service.platform}</span>
                   </div>
-                  <h3 className="text-xl font-bold">{service.title}</h3>
-                  <p className="mt-2 text-sm text-app-muted">{service.metric}</p>
+                  <h3 className="text-xl font-bold">{service.title[language]}</h3>
+                  <p className="mt-2 text-sm text-app-muted">{service.metric[language]}</p>
                   <div className="mt-8 flex items-end justify-between">
                     <div>
-                      <p className="text-xs uppercase tracking-wider text-app-muted">Starting at</p>
+                      <p className="text-xs uppercase tracking-wider text-app-muted">{language === "vi" ? "Giá từ" : "Starting at"}</p>
                       <p className="mt-1 text-2xl font-black text-brand-400">
-                        {service.service
-                          ? `${formatDisplayMoney(service.service.sellingPrice, currency, rate?.rate, 4)} / 1K`
-                          : "—"}
+                        {`${formatDisplayMoney(service.service?.sellingPrice || service.fallbackPriceUsd, currency, rate?.rate, 2)} / ${language === "vi" ? "1.000" : "1K"}`}
                       </p>
                     </div>
                     <ArrowRight className="h-5 w-5 text-zinc-600 transition-transform group-hover:translate-x-1 group-hover:text-brand-400" />
@@ -422,13 +470,13 @@ export default function LandingPage() {
         <div className="mx-auto max-w-7xl">
           <div className="grid gap-5 lg:grid-cols-4">
             {pipeline.map((step, index) => (
-              <div key={step.label} className="relative rounded-3xl border border-white/10 bg-surface-800/70 p-6">
+              <div key={step.label.en} className="relative rounded-3xl border border-white/10 bg-surface-800/70 p-6">
                 <div className="mb-6 flex items-center justify-between">
                   <step.icon className="h-8 w-8 text-brand-400" />
                   <span className="text-5xl font-black text-white/[0.04]">0{index + 1}</span>
                 </div>
-                <h3 className="text-xl font-bold">{step.label}</h3>
-                <p className="mt-2 text-app-muted">{step.value}</p>
+                <h3 className="text-xl font-bold">{step.label[language]}</h3>
+                <p className="mt-2 text-app-muted">{step.value[language]}</p>
               </div>
             ))}
           </div>
@@ -468,7 +516,7 @@ export default function LandingPage() {
             <a href="mailto:support@3flames.com" className="transition-colors hover:text-app-fg">{t("common.support")}</a>
           </div>
 
-          <p className="text-sm text-zinc-600">© {new Date().getFullYear()} 3Flames. All rights reserved.</p>
+          <p className="text-sm text-zinc-600">© {new Date().getFullYear()} 3Flames. {language === "vi" ? "Mọi quyền được bảo lưu." : "All rights reserved."}</p>
         </div>
       </footer>
     </main>

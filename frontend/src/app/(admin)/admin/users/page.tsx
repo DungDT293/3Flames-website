@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { Users, Search, Loader2, MoreHorizontal, DollarSign, Ban, CheckCircle, ShieldAlert } from "lucide-react";
+import Link from "next/link";
+import { Users, Search, Loader2, MoreHorizontal, DollarSign, Ban, CheckCircle, ShieldAlert, Trash2, Eye } from "lucide-react";
 import toast from "react-hot-toast";
 import { AxiosError } from "axios";
 import {
@@ -10,6 +11,7 @@ import {
   suspendUser,
   unsuspendUser,
   updateUserRole,
+  deleteUser,
   type AdminUser,
 } from "@/lib/api/admin";
 import type { ApiError, UserRole } from "@/types/api";
@@ -67,6 +69,10 @@ function canAssignRole(actorRole: string | undefined, role: UserRole): boolean {
   return false;
 }
 
+function canDeleteUser(actorId: string | undefined, actorRole: string | undefined, target: AdminUser): boolean {
+  return actorRole === "SUPER_ADMIN" && actorId !== target.id && target.role !== "SUPER_ADMIN";
+}
+
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("vi-VN", { dateStyle: "short" }).format(new Date(value));
 }
@@ -89,6 +95,9 @@ export default function UserManagementPage() {
   const [isSuspending, setIsSuspending] = useState(false);
   const [roleDialog, setRoleDialog] = useState<{ open: boolean; user: AdminUser | null; role: UserRole | null }>({ open: false, user: null, role: null });
   const [unsuspendDialog, setUnsuspendDialog] = useState<{ open: boolean; user: AdminUser | null }>({ open: false, user: null });
+  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; user: AdminUser | null }>({ open: false, user: null });
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadUsers = useCallback(async (page: number) => {
@@ -169,6 +178,12 @@ export default function UserManagementPage() {
     setOpenMenuId(null);
   }
 
+  function openDeleteDialog(user: AdminUser) {
+    setDeleteDialog({ open: true, user });
+    setDeleteConfirmation("");
+    setOpenMenuId(null);
+  }
+
   async function handleSuspend() {
     if (!suspendDialog.user) return;
     if (!suspendReason.trim()) return toast.error("Reason is required.");
@@ -209,6 +224,27 @@ export default function UserManagementPage() {
     } catch (err) {
       const axiosErr = err as AxiosError<ApiError>;
       toast.error(axiosErr.response?.data?.error || "Không thể mở khóa người dùng.");
+    }
+  }
+
+  async function confirmDeleteUser() {
+    if (!deleteDialog.user) return;
+    if (deleteConfirmation !== deleteDialog.user.username) {
+      toast.error("Nhập đúng username để xác nhận xoá.");
+      return;
+    }
+    setIsDeleting(true);
+    try {
+      const res = await deleteUser(deleteDialog.user.id);
+      toast.success(res.message);
+      setDeleteDialog({ open: false, user: null });
+      setDeleteConfirmation("");
+      loadUsers(pagination.page);
+    } catch (err) {
+      const axiosErr = err as AxiosError<ApiError>;
+      toast.error(axiosErr.response?.data?.error || "Không thể xoá người dùng.");
+    } finally {
+      setIsDeleting(false);
     }
   }
 
@@ -266,6 +302,7 @@ export default function UserManagementPage() {
                           <button onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === u.id ? null : u.id); }} className="rounded-md p-1.5 text-app-muted hover:text-app-fg hover:bg-app-elevated transition-colors"><MoreHorizontal className="h-4 w-4" /></button>
                           {openMenuId === u.id && (
                             <div className="absolute right-0 top-full z-20 mt-1 w-56 rounded-lg border border-app-border bg-app-card py-1 shadow-xl shadow-black/30">
+                              <Link href={`/admin/users/${u.id}`} className="flex w-full items-center gap-2 px-4 py-2 text-sm text-app-fg hover:bg-app-elevated"><Eye className="h-4 w-4" />Xem chi tiết</Link>
                               {manageable && <button onClick={() => openBalanceDialog(u)} className="flex w-full items-center gap-2 px-4 py-2 text-sm text-app-fg hover:bg-app-elevated"><DollarSign className="h-4 w-4" />Điều chỉnh số dư</button>}
                               {manageable && canAssignRole(currentUser?.role, "SUPER_ADMIN") && u.role !== "SUPER_ADMIN" && <button onClick={() => { setRoleDialog({ open: true, user: u, role: "SUPER_ADMIN" }); setOpenMenuId(null); }} className="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-app-elevated"><ShieldAlert className="h-4 w-4" />Đặt Super Admin</button>}
                               {manageable && canAssignRole(currentUser?.role, "ADMIN") && u.role !== "ADMIN" && <button onClick={() => { setRoleDialog({ open: true, user: u, role: "ADMIN" }); setOpenMenuId(null); }} className="flex w-full items-center gap-2 px-4 py-2 text-sm text-brand-400 hover:bg-app-elevated"><Users className="h-4 w-4" />Đặt Admin</button>}
@@ -273,7 +310,8 @@ export default function UserManagementPage() {
                               {manageable && canAssignRole(currentUser?.role, "USER") && u.role !== "USER" && <button onClick={() => { setRoleDialog({ open: true, user: u, role: "USER" }); setOpenMenuId(null); }} className="flex w-full items-center gap-2 px-4 py-2 text-sm text-app-fg hover:bg-app-elevated"><Users className="h-4 w-4" />Chuyển Khách hàng</button>}
                               {manageable && <div className="my-1 border-t border-app-border" />}
                               {manageable && (u.status === "SUSPENDED" ? <button onClick={() => { setUnsuspendDialog({ open: true, user: u }); setOpenMenuId(null); }} className="flex w-full items-center gap-2 px-4 py-2 text-sm text-green-400 hover:bg-app-elevated"><CheckCircle className="h-4 w-4" />Mở khóa</button> : <button onClick={() => openSuspendDialog(u)} className="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-app-elevated"><Ban className="h-4 w-4" />Tạm khóa</button>)}
-                              {!manageable && <p className="px-4 py-2 text-sm text-app-muted">Không có quyền thao tác</p>}
+                              {canDeleteUser(currentUser?.id, currentUser?.role, u) && <button onClick={() => openDeleteDialog(u)} className="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-app-elevated"><Trash2 className="h-4 w-4" />Xoá người dùng</button>}
+                              {!manageable && !canDeleteUser(currentUser?.id, currentUser?.role, u) && <p className="px-4 py-2 text-sm text-app-muted">Không có quyền thao tác</p>}
                             </div>
                           )}
                         </div>
@@ -308,6 +346,35 @@ export default function UserManagementPage() {
 
       <Dialog open={unsuspendDialog.open} onOpenChange={(open) => !open && setUnsuspendDialog({ open: false, user: null })}>
         <DialogContent onClose={() => setUnsuspendDialog({ open: false, user: null })}><DialogHeader><DialogTitle>Mở khóa người dùng</DialogTitle><DialogDescription>Mở lại quyền truy cập dashboard và API cho @{unsuspendDialog.user?.username}?</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" onClick={() => setUnsuspendDialog({ open: false, user: null })}>Hủy</Button><Button onClick={confirmUnsuspend}>Mở khóa</Button></DialogFooter></DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteDialog.open} onOpenChange={(open) => !open && setDeleteDialog({ open: false, user: null })}>
+        <DialogContent onClose={() => setDeleteDialog({ open: false, user: null })}>
+          <DialogHeader>
+            <DialogTitle>Xoá người dùng</DialogTitle>
+            <DialogDescription>
+              Thao tác này chỉ dành cho Super Admin. Hệ thống sẽ ẩn danh và khóa tài khoản @{deleteDialog.user?.username}, vẫn giữ lịch sử đơn hàng/giao dịch để bảo toàn sổ cái.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+              Không thể xoá chính bạn hoặc tài khoản Super Admin khác.
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="delete-confirmation">Nhập username để xác nhận: {deleteDialog.user?.username}</Label>
+              <Input
+                id="delete-confirmation"
+                value={deleteConfirmation}
+                onChange={(e) => setDeleteConfirmation(e.target.value)}
+                placeholder={deleteDialog.user?.username || "username"}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setDeleteDialog({ open: false, user: null })} disabled={isDeleting}>Hủy</Button>
+            <Button variant="destructive" onClick={confirmDeleteUser} isLoading={isDeleting}>Xoá người dùng</Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
     </div>
   );
