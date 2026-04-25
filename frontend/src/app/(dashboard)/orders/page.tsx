@@ -332,7 +332,7 @@ export default function OrderHistoryPage() {
       )}
 
       {/* Table */}
-      {!isLoading && !error && orders.length > 0 && (
+      {!isLoading && orders.length > 0 && (
         <>
           <div className="overflow-hidden rounded-2xl border border-app-border bg-app-card shadow-xl shadow-black/10">
             <Table>

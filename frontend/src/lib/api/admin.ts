@@ -116,7 +116,7 @@ export interface AdminDepositRequest {
   id: string;
   userId: string;
   memo: string;
-  amountVnd: string;
+  amountVnd: number;
   status: DepositStatus;
   providerPaymentId: string | null;
   transactionId: string | null;
@@ -326,8 +326,8 @@ export async function unsuspendUser(
   return res.data;
 }
 
-export async function deleteUser(userId: string): Promise<{ message: string; userId: string; status: AdminUser["status"] }> {
-  const res = await api.delete<{ message: string; userId: string; status: AdminUser["status"] }>(`/admin/users/${userId}`);
+export async function deleteUser(userId: string): Promise<{ message: string; user: Pick<AdminUser, "id" | "username" | "email" | "status"> }> {
+  const res = await api.delete<{ message: string; user: Pick<AdminUser, "id" | "username" | "email" | "status"> }>(`/admin/users/${userId}`);
   return res.data;
 }
 
