@@ -9,6 +9,7 @@ import {
   AccountSuspendedError,
   EmailNotVerifiedError,
   InvalidOtpError,
+  OtpRateLimitError,
 } from '../application/auth.service';
 import { OtpEmailDeliveryError } from '../../../shared/infrastructure/email.service';
 
@@ -102,6 +103,10 @@ authRouter.post(
       const result = await authService.resetPassword(email, otp, password);
       res.json({ message: 'Đổi mật khẩu thành công', success: result.success, email: result.email });
     } catch (error) {
+      if (error instanceof OtpRateLimitError) {
+        res.status(429).json({ error: error.message });
+        return;
+      }
       if (error instanceof InvalidCredentialsError) {
         res.status(404).json({ error: 'Email not found' });
         return;
@@ -164,6 +169,10 @@ authRouter.post(
         token: result.token,
       });
     } catch (error) {
+      if (error instanceof OtpRateLimitError) {
+        res.status(429).json({ error: error.message });
+        return;
+      }
       if (error instanceof InvalidOtpError) {
         res.status(400).json({ error: error.message });
         return;

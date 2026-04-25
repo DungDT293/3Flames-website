@@ -12,6 +12,10 @@ const transporter = nodemailer.createTransport({
   } : undefined,
 });
 
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 export class OtpEmailDeliveryError extends Error {
   constructor(message: string) {
     super(message);
@@ -25,6 +29,8 @@ export async function sendOtpEmail(to: string, otp: string): Promise<void> {
     return;
   }
 
+  const safeOtp = escapeHtml(otp);
+
   try {
     await transporter.sendMail({
       from: config.smtp.from,
@@ -35,7 +41,7 @@ export async function sendOtpEmail(to: string, otp: string): Promise<void> {
         <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111">
           <h2>Xác thực email 3Flames</h2>
           <p>Mã xác thực của bạn:</p>
-          <p style="font-size:28px;font-weight:700;letter-spacing:6px">${otp}</p>
+          <p style="font-size:28px;font-weight:700;letter-spacing:6px">${safeOtp}</p>
           <p>Mã có hiệu lực trong 10 phút. Nếu bạn không tạo tài khoản 3Flames, vui lòng bỏ qua email này.</p>
         </div>
       `,

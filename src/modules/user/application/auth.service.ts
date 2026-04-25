@@ -2,15 +2,43 @@ import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import jwt, { type SignOptions } from 'jsonwebtoken';
 import { prisma } from '../../../shared/infrastructure/database';
+import { redis } from '../../../shared/infrastructure/redis';
 import { config } from '../../../config';
 import { OtpEmailDeliveryError, sendOtpEmail } from '../../../shared/infrastructure/email.service';
 import { logger } from '../../../shared/infrastructure/logger';
 
 const SALT_ROUNDS = 12;
 const OTP_TTL_MS = 10 * 60 * 1000;
+const OTP_MAX_ATTEMPTS = 5;
 
 function generateOtp(): string {
   return crypto.randomInt(100000, 1000000).toString();
+}
+
+function maskEmail(email: string): string {
+  const [local, domain] = email.split('@');
+  const visible = local.length <= 2 ? local[0] : local.slice(0, 2);
+  return `${visible}***@${domain}`;
+}
+
+function maskPhone(phone: string): string {
+  return phone.length <= 4 ? '***' : `${phone.slice(0, 2)}***${phone.slice(-2)}`;
+}
+
+async function checkOtpAttempts(email: string): Promise<void> {
+  const key = `3f:otp:attempts:${email}`;
+  const attempts = await redis.incr(key);
+  if (attempts === 1) await redis.expire(key, Math.ceil(OTP_TTL_MS / 1000));
+  if (attempts > OTP_MAX_ATTEMPTS) throw new OtpRateLimitError();
+}
+
+async function clearOtpAttempts(email: string): Promise<void> {
+  await redis.del(`3f:otp:attempts:${email}`);
+}
+
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
 export class AuthService {
@@ -72,6 +100,8 @@ export class AuthService {
   }
 
   async verifyEmail(email: string, otp: string) {
+    await checkOtpAttempts(email);
+
     const user = await prisma.user.findUnique({
       where: { email },
       select: {
@@ -87,13 +117,17 @@ export class AuthService {
       },
     });
 
-    if (!user || user.otpCode !== otp || !user.otpExpiresAt || user.otpExpiresAt < new Date()) {
+    const otpValid = user?.otpCode && timingSafeEqual(user.otpCode, otp);
+
+    if (!user || !otpValid || !user.otpExpiresAt || user.otpExpiresAt < new Date()) {
       throw new InvalidOtpError();
     }
 
     if (user.status !== 'ACTIVE') {
       throw new AccountSuspendedError();
     }
+
+    await clearOtpAttempts(email);
 
     const updated = await prisma.user.update({
       where: { id: user.id },
@@ -127,9 +161,9 @@ export class AuthService {
     }
 
     return {
-      email: user.email,
+      email: maskEmail(user.email),
       username: user.username,
-      phone: user.phone,
+      phone: user.phone ? maskPhone(user.phone) : undefined,
       isEmailVerified: user.isEmailVerified,
     };
   }
@@ -215,6 +249,8 @@ export class AuthService {
   }
 
   async resetPassword(email: string, otp: string, password: string) {
+    await checkOtpAttempts(email);
+
     const user = await prisma.user.findUnique({
       where: { email },
       select: { id: true, email: true, status: true, otpCode: true, otpExpiresAt: true },
@@ -224,9 +260,13 @@ export class AuthService {
       throw new InvalidCredentialsError();
     }
 
-    if (user.otpCode !== otp || !user.otpExpiresAt || user.otpExpiresAt < new Date()) {
+    const otpValid = user.otpCode && timingSafeEqual(user.otpCode, otp);
+
+    if (!otpValid || !user.otpExpiresAt || user.otpExpiresAt < new Date()) {
       throw new InvalidOtpError();
     }
+
+    await clearOtpAttempts(email);
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
@@ -327,5 +367,12 @@ export class InvalidOtpError extends Error {
   constructor() {
     super('Mã xác thực không hợp lệ hoặc đã hết hạn');
     this.name = 'InvalidOtpError';
+  }
+}
+
+export class OtpRateLimitError extends Error {
+  constructor() {
+    super('Quá nhiều lần thử sai mã OTP. Vui lòng yêu cầu mã mới.');
+    this.name = 'OtpRateLimitError';
   }
 }
